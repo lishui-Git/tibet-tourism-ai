@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>西藏旅游景点智能评价与分析系统 · 开发骨架</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <h1>基于 DeepSeek 的西藏旅游景点智能评价与分析系统</h1>
+    <p class="subtitle">阶段一 · 开发环境与代码骨架初始化</p>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <h2>骨架自检</h2>
+      <p class="hint">
+        本页仅用于验证「Flask 可运行 / 模板可渲染 / 静态资源可加载 / MySQL 可连接」。
+        业务页面（数据总览、景点分析、智能评价、景点对比、智能问答）按详细设计 §6.2 在后续阶段实现。
+      </p>
+      <button id="btn-check" type="button">运行自检</button>
+      <pre id="check-out" class="out">点击上方按钮开始自检…</pre>
+    </section>
+
+    <section class="card">
+      <h2>已确定的系统范围（只读说明，避免误读进度）</h2>
+      <table>
+        <tbody>
+          <tr><th>数据口径</th><td>西藏及进藏沿线（川藏／滇藏／青藏线）旅游景点评论</td></tr>
+          <tr><th>数据规模</th><td>59,033 条评论 / 837 个景点 / 15 个字段</td></tr>
+          <tr><th>技术路线</th><td>Python 清洗 + Spark 离线分析 + DeepSeek 智能评价 + MySQL 8 + Flask + ECharts</td></tr>
+          <tr><th>数据库</th><td>MySQL 8.0.32 · <code>tibet_review</code> · 17 张表（已冻结）</td></tr>
+          <tr><th>明确不做</th><td>实时流式计算、个性化推荐、向量检索／RAG、微服务与中间件</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

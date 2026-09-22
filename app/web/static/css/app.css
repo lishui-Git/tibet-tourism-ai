@@ -1,0 +1,82 @@
+/* =============================================================================
+   阶段一骨架页样式（原生 CSS，不引入任何前端框架与构建链，详见详细设计 §10）
+   ============================================================================= */
+:root {
+  --c-bg: #f5f7fa;
+  --c-card: #ffffff;
+  --c-line: #d9e1ec;
+  --c-text: #1f2d3d;
+  --c-muted: #6b7c93;
+  --c-primary: #1168bd;
+  --c-ok: #2e7d32;
+  --c-bad: #c62828;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+  line-height: 1.7;
+}
+
+.topbar {
+  background: linear-gradient(135deg, #08427b 0%, #1168bd 100%);
+  color: #fff;
+  padding: 28px 32px;
+}
+.topbar h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.topbar .subtitle { margin: 6px 0 0; opacity: .85; font-size: 14px; }
+
+.wrap {
+  max-width: 960px;
+  margin: 24px auto 64px;
+  padding: 0 16px;
+  display: grid;
+  gap: 20px;
+}
+
+.card {
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  padding: 20px 24px;
+}
+.card h2 { margin: 0 0 10px; font-size: 17px; }
+
+.hint { color: var(--c-muted); font-size: 14px; margin: 0 0 14px; }
+
+button {
+  background: var(--c-primary);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 20px;
+  font-size: 14px;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button:disabled { opacity: .6; cursor: progress; }
+
+.out {
+  margin: 14px 0 0;
+  padding: 14px;
+  background: #0f172a;
+  color: #d7e3f4;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.out.ok { border-left: 4px solid var(--c-ok); }
+.out.bad { border-left: 4px solid var(--c-bad); }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { border: 1px solid var(--c-line); padding: 8px 12px; text-align: left; vertical-align: top; }
+th { background: #eef3f9; width: 128px; font-weight: 600; white-space: nowrap; }
+code { background: #eef3f9; padding: 1px 5px; border-radius: 3px; font-size: 13px; }

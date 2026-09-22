@@ -1,0 +1,15 @@
+﻿===== guardian start PID=102516 09-17 01:11:22 =====
+----- round 1 start 09-17 01:11:22 -----
+----- round 1 end code=-1 09-17 02:07:22 -----
+another collector is running, exit.
+----- round 2 start 09-17 02:07:52 -----
+===== guardian start PID=101632 09-17 02:12:59 =====
+----- round 1 start 09-17 02:12:59 pending=True -----
+----- round 1 end code=-1 09-17 02:18:06 -----
+another collector is running, exit.
+----- round 2 start 09-17 02:18:36 pending=True -----
+found stale python, killing.
+===== guardian start PID=104128 09-17 03:10:36 =====
+----- round 1 start 09-17 03:10:36 pending=pending_tibet.txt -----
+----- round 1 end code=0 09-17 05:46:55 -----
+===== ALL DONE 09-17 05:47:03 =====
