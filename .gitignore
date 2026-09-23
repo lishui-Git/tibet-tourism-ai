@@ -72,3 +72,16 @@ tmp/*.docx
 tmp/*.pptx
 tmp/*.xlsx
 tmp/~$*
+
+# ---------------------------------------------------------------------------
+# ④ Maven 构建产物（Spark 模块）
+#    说明：target/ 下是编译输出与打包后的作业 jar（约 3 MB），可由源码重新构建，
+#          属可再生产物，不入库；源码与 pom.xml 才是需要版本管理的部分。
+#    重建方式：见 spark/README.md 第 5 节（mvn clean package）。
+# ---------------------------------------------------------------------------
+target/
+spark/target/
+**/target/
+.idea/
+*.iml
+dependency-reduced-pom.xml

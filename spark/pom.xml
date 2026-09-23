@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  Spark 离线分析模块（C4 容器「Spark 离线分析」）· Maven 构建文件
+
+  用途：把 Scala 3.13.10 源码与 Spark 3.3.1 依赖一起编译成可在 spark-submit
+        上运行的作业 jar。
+
+  技术栈（已冻结，不得自行更改；依据 spark/README.md §2 与项目现状分析.md §8.1/§8.2）：
+    · Spark  3.3.1   —— 3.3.x 是最后一个正式支持 Java 8 的版本线，不要升级
+    · Scala  2.13.10 —— 所有 Spark 构件必须用 _2.13 后缀
+    · JDK    1.8     —— 源码级别锁定 1.8
+    · MySQL Connector/J 8.0.33 —— MySQL 8 必须用 8.x 驱动
+
+  为什么 Spark 依赖 scope=provided：
+    · 运行环境（spark-submit）自身已经提供 Spark 全部 jar；
+    · 打进 fat jar 会造成「Spark 类重复 / 版本冲突」，是 Spark 作业的经典坑。
+    · 因此本作业只编译、不打包 Spark 本身；运行时由 spark-submit 提供。
+
+  如何构建（在 spark/ 目录下执行）：
+    D:\bigdata\apache-maven-3.9.9\bin\mvn.cmd clean package
+  ============================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.tibet.tourism</groupId>
+    <artifactId>spark-offline-analysis</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>spark-offline-analysis</name>
+    <description>基于 DeepSeek 的西藏旅游景点智能评价与分析系统 · Spark 离线分析模块（C-SPK-01~05）</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <!-- 必须与已安装的 Scala 保持一致（scalac -version → 2.13.10） -->
+        <scala.version>2.13.10</scala.version>
+        <scala.binary.version>2.13</scala.binary.version>
+        <spark.version>3.3.1</spark.version>
+        <hadoop.version>3.3.2</hadoop.version>
+        <mysql.connector.version>8.0.33</mysql.connector.version>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+    </properties>
+
+    <dependencies>
+        <!-- ================= Spark（随运行环境提供，故为 provided） ================= -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- MLlib：C-SPK-04 三分类情感基线 -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-mllib_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ================= Hadoop 客户端（Windows 本地运行需要） ================= -->
+        <!-- 本地模式读写本地/远端文件系统时需要；与 Spark 3.3.1 的 hadoop3 版本线对齐 -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ================= 中文分词（C-SPK-03 特征工程） ================= -->
+        <!-- jieba-analysis：结巴分词的 Java 版实现。
+             Spark 3.3.1 内置的 RegexTokenizer 按正则切分，无法给出中文词边界，
+             因此中文分词必须引入分词库；该库约 2 MB，随作业 jar 一起打包。 -->
+        <dependency>
+            <groupId>com.huaban</groupId>
+            <artifactId>jieba-analysis</artifactId>
+            <version>1.0.2</version>
+        </dependency>
+
+        <!-- ================= MySQL 驱动（设计规定的 8.0.33） ================= -->
+        <!-- 本模块需要写结果表（stat_* / sentiment / topic / topic_word）。
+             运行时不打包进 fat jar，改用 spark-submit 的 jars 选项传入；
+             此处用 compile 作用域以便本地集成测试时直接可解析到。 -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>${mysql.connector.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <sourceDirectory>src/main/scala</sourceDirectory>
+
+        <plugins>
+            <!-- Scala 编译 -->
+            <plugin>
+                <groupId>net.alchim31.maven</groupId>
+                <artifactId>scala-maven-plugin</artifactId>
+                <version>4.9.2</version>
+                <executions>
+                    <execution>
+                        <id>scala-compile</id>
+                        <goals>
+                            <goal>add-source</goal>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <scalaVersion>${scala.version}</scalaVersion>
+                    <args>
+                        <!-- 目标 JVM 1.8（与 JDK 1.8 对齐） -->
+                        <arg>-target:jvm-1.8</arg>
+                        <arg>-deprecation</arg>
+                        <arg>-feature</arg>
+                    </args>
+                </configuration>
+            </plugin>
+
+            <!-- 编译级别锁定 1.8 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>1.8</source>
+                    <target>1.8</target>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+
+            <!--
+              打包策略：**不做包含 Spark 的 fat jar**，但**要包含第三方小依赖**。
+              · Spark / Hadoop 依赖为 provided —— 运行时由 spark-submit 提供，
+                打进 jar 会造成 Spark 类重复与版本冲突（Spark 作业经典坑）。
+              · 中文分词库 jieba 必须**打进来**：Spark 的任务执行使用独立的
+                classloader，仅设置 driver 类路径不够；
+                而 Windows 上给 spark-submit 传多个 jar 也不稳定（实测报 Invalid argument）。
+                直接把 jieba（约 2 MB）shade 进作业 jar，可彻底消除类路径问题。
+
+              产物：target/spark-offline-analysis-1.0.0.jar（自包含 jieba）
+              运行命令因此只需额外提供 MySQL 驱动（写库时才需要）。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <!-- 只打包 jieba；Spark/Hadoop 为 provided，本来就不会进来 -->
+                                <includes>
+                                    <include>com.huaban:jieba-analysis</include>
+                                </includes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.tibet.tourism.spark.Main</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- 把 src/main/resources 纳入构建（停用词表就在其中） -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <configuration>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
