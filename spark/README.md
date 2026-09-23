@@ -1,7 +1,26 @@
 # Spark 离线分析（阶段四，尚未开始）
 
 本目录是 C4 容器「**Spark 离线分析**」（JVM 进程 / Scala）的预留位置。
-**阶段一不在此目录写入任何代码**，仅保留本说明，避免出现「有目录无实现」的假进度。
+**当前不在此目录写入任何代码**，仅保留本说明，避免出现「有目录无实现」的假进度。
+
+> 进度说明：Python 数据清洗与导入（阶段一～二）**已完成**——`spot` 837 行、`review` 59,033 行已全量入库，
+> 清洗版规范化文件（`data/旅游评论数据集_清洗版_v1.csv`）与统计报告已产出。
+> Spark 侧按既定顺序排在其后，**尚未开始**。
+
+---
+
+## 0. 数据源（动手前先明确读什么）
+
+Spark 作业的数据来源有两条，**两者内容一致，任选其一**（`C4容器图.md` §3：Spark 与 Python 通过 MySQL 解耦）：
+
+| 来源 | 位置 | 说明 |
+|---|---|---|
+| **MySQL（推荐）** | 库 `tibet_review` 的 `review` 表 | 阶段一已全量导入 59,033 行，含全部派生字段与分层标记；`C-SPK-01` 按此读取 |
+| 清洗版文件 | `data/旅游评论数据集_清洗版_v1.csv` | 阶段二产出（59,033 行 × 23 列，UTF-8 with BOM），内容与库内 `review` 口径一致 |
+
+派生字段与分层标记（`content_length`／`publish_year`／`publish_month`／`ip_province`／
+`ip_is_unknown`／`is_low_info`／`is_dup_content`／`dup_group_id`）**阶段二已算好**，
+Spark 侧直接使用即可，不要重复实现清洗规则。
 
 ---
 
@@ -13,7 +32,7 @@
 → 4. DeepSeek 语义抽取 → 5. 事实包与景点评价 → 6. Flask 接口与前端 → 7. 景点对比
 → 8. 智能问答 → 9. 测试验收
 
-阶段一只做第 1 步的验证与第 2 步的环境骨架，因此 Spark 部分尚未开始。
+目前已完成第 1 步与第 2 步（数据导入 + 清洗与预处理），因此 Spark 部分尚未开始。
 
 ---
 
@@ -83,3 +102,13 @@ mysql-connector-j   8.0.33
 ```
 jdbc:mysql://localhost:3306/tibet_review?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
 ```
+
+---
+
+## 6. 答辩时重点理解（本目录目前是空的，先理解这几条）
+
+1. **为什么用 Scala 而不用 PySpark**：PySpark 3.3.1 官方仅验证到 Python 3.10，本机是 3.11.7；且作业最终交付为 Maven 构件，Scala 更贴合 Spark 原生生态。
+2. **为什么锁死 Spark 3.3.1 / JDK 1.8 / Scala 2.13**：3.3.x 是最后一个正式支持 Java 8 的版本线；Scala 2.13 决定了所有构件必须用 `_2.13` 后缀（写错就跑不起来）。
+3. **Spark 与 DeepSeek 是"基线 + 增强"，不是替代**：MLlib 回答"整体情感如何"，DeepSeek 回答"评论在说什么、游客在乎什么"（所针对的评价方面、关键词、摘要），二者做对比实验。
+4. **Spark 不接触 DeepSeek**：本容器不发起任何 HTTP 调用，与 Python 侧通过 MySQL 解耦，任一侧可单独重跑。
+5. **分词在本目录实现**（已定论）：中文分词、停用词过滤、TF-IDF 归 `C-SPK-03`；Python 侧只做清洗与规范化，不重复实现。
