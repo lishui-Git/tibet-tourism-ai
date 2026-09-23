@@ -75,6 +75,17 @@ def _get_app_int(name: str, default: int) -> int:
         return default
 
 
+def _get_app_float(name: str, default: float) -> float:
+    """读取「应用自有」浮点型环境变量（APP_ 前缀优先，兼容旧名；非法值回落默认值）。"""
+    raw = _get_app(name, "")
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def _get_bool(name: str, default: bool = False) -> bool:
     """读取布尔型环境变量，接受 1/true/yes/on（不区分大小写）。"""
     raw = _get(name, "")
@@ -146,6 +157,10 @@ class DeepSeekSettings:
     timeout: int = _get_app_int("DEEPSEEK_TIMEOUT", 60)
     max_concurrency: int = _get_app_int("DEEPSEEK_MAX_CONCURRENCY", 3)
     max_retry: int = _get_app_int("DEEPSEEK_MAX_RETRY", 2)
+    # 成本核算用的参考单价（元 / 百万 tokens）。属"可配置的估算参数"，
+    # 真实费用一律以 API 返回的 usage 为准；单价如与官网不符可用 .env 覆盖。
+    price_input: float = _get_app_float("DEEPSEEK_PRICE_INPUT", 2.0)
+    price_output: float = _get_app_float("DEEPSEEK_PRICE_OUTPUT", 8.0)
 
     @property
     def is_configured(self) -> bool:

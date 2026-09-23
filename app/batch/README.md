@@ -2,21 +2,26 @@
 
 > 本目录对应 C4 容器「**Python 批处理服务**」，承载组件 `C-BAT-01`～`C-BAT-07`。
 > 上级说明见 [`../README.md`](../README.md)。
+> 阶段四（DeepSeek）的调用封装与统一入口见 [`../llm/README.md`](../llm/README.md)。
 
 ---
 
 ## 1. 模块职责
 
-把**离线**数据任务串成可重复执行的流程：CSV → 校验 → 规范化 → 拆分 → 分层标记 → 入库 / 产出文件。
-服务对象是后续的 Spark 分析、DeepSeek 语义分析与 Web 展示，三者都通过 MySQL 取数。
+把**离线**数据任务串成可重复执行的流程：CSV → 校验 → 规范化 → 拆分 → 分层标记 → 入库 / 产出文件，
+再用 DeepSeek 完成评论语义理解与景点评价生成。服务对象是 Spark 分析、Web 展示与论文实验。
 
 ## 2. 主要文件
 
-| 文件 | 行数 | 阶段 | 职责 |
-|---|---|---|---|
-| `__init__.py` | 26 | — | 包说明与 C-BAT-01~07 的实现进度表 |
-| `import_dataset.py` | 926 | 阶段一 | 最终数据集 CSV → `spot` / `review` 两张核心表（**唯一写核心表的入口**） |
-| `clean_dataset.py` | 773 | 阶段二 | 清洗与预处理 SOP：产出清洗版文件 + 统计报告（**默认不写核心表**） |
+| 文件 | 阶段 | 职责 |
+|---|---|---|
+| `__init__.py` | — | 包说明与 C-BAT-01~07 的实现进度表 |
+| `import_dataset.py` | 阶段一 | 最终数据集 CSV → `spot` / `review`（**唯一写核心表的入口**） |
+| `clean_dataset.py` | 阶段二 | 清洗与预处理 SOP：产出清洗版文件 + 统计报告（默认不写核心表） |
+| `task_registry.py` | 阶段四 | `analysis_task` / `task_log` 登记（三个 AI 组件共用，避免各写一套 INSERT） |
+| `semantic_analysis.py` | 阶段四 | **C-BAT-05** 评论语义分析：分层过滤 → 调 DeepSeek → 校验 → 写三张语义结果表 |
+| `fact_package.py` | 阶段四 | **C-BAT-06** 景点事实包：纯 SQL 聚合，**零模型调用** → `spot_fact_package` |
+| `spot_report.py` | 阶段四 | **C-BAT-07** 景点智能评价：事实包 → DeepSeek → 四段校验 + 数字一致性 → `spot_report` |
 
 ## 3. 输入 / 输出
 
@@ -98,6 +103,13 @@ clean_dataset.py
 
 # 产出复核
 .\.venv\Scripts\python.exe scripts\verify_cleaned.py
+
+# ---------- 阶段四：DeepSeek 语义分析（C-BAT-05~07） ----------
+# 详见 ../llm/README.md；统一入口是 python -m app.llm
+.\.venv\Scripts\python.exe -m app.llm --stage check                 # 只读自检
+.\.venv\Scripts\python.exe -m app.llm --stage semantic --dry-run    # 只看工作量，不调用不写库
+.\.venv\Scripts\python.exe -m app.llm --stage all --limit 8 --mock  # 零消耗链路联调
+.\.venv\Scripts\python.exe scripts\verify_phase4.py                 # 29 项自动验证（含清理）
 ```
 
 **幂等与断点续跑**：两个脚本都设计为可重复执行——
@@ -108,29 +120,40 @@ clean_dataset.py
 
 | 组件 | 实现位置 |
 |---|---|
-| `C-BAT-01` 任务编排与断点续跑 | `clean_dataset.py` 的 7 步 SOP 编排（`SOP_STAGES` / `StageRecorder`） |
+| `C-BAT-01` 任务编排与断点续跑 | `clean_dataset.py` 的 7 步 SOP（`SOP_STAGES` / `StageRecorder`）；阶段四的 `task_registry.py` + 各组件"以结果表为断点游标"的续跑逻辑 |
 | `C-BAT-02` 数据校验 | 两个脚本的行数/表头校验；`clean_dataset.py` 的 `validate_row_count` / `validate_columns` / `validate_spot_level` |
 | `C-BAT-03` 清洗与规范化 | `import_dataset.py` 的字段映射与派生；`clean_dataset.py` 的拆分与规范化文件输出 |
-| `C-BAT-04` 去重与分层 | 低信息量（BR-05）与重复正文（BR-06）标记 |
-| `C-BAT-05/06/07` | **未实现**（语义抽取、事实包构造、评价生成 → 阶段五） |
+| `C-BAT-04` 去重与分层 | 低信息量（BR-05）与重复正文（BR-06）标记（阶段一/二生成，阶段四据此分层） |
+| `C-BAT-05` 语义抽取 | `semantic_analysis.py`（+ `../llm/` 的客户端、Prompt、校验） |
+| `C-BAT-06` 事实包构造 | `fact_package.py`（无模型调用，事实只由 SQL 聚合产生） |
+| `C-BAT-07` 评价生成 | `spot_report.py`（事实包 → DeepSeek → 四段校验 + 数字一致性校验） |
+
+> 阶段四新增的组件全部复用冻结的 17 张表：语义结果写 `sentiment` / `aspect` / `comment_semantic`，
+> 事实与评价写 `spot_fact_package` / `spot_report`，任务与日志写 `analysis_task` / `task_log`。
+> **没有新增表、没有新增字段、没有修改任何表结构。**
 
 ## 8. 与其他模块的关系
 
-- **→ MySQL**：唯一持久化出口。`clean_dataset.py` 默认不写核心表，只读 CSV 产出文件。
-- **→ `spark/`**：Spark 从 `review` 表或清洗版 CSV 取数；清洗规则（含派生字段与分层标记）**已在 Python 侧算好**，Spark 不重复实现。
-- **→ `scripts/`**：`scripts/verify_cleaned.py` 复核本目录的清洗产物；`scripts/check_env.py` 校验库结构是否与设计一致。
-- **← `app/config.py`**：所有路径与数据库配置均来自 `settings.paths` / `settings.db`，**代码内无绝对路径**。
+- **→ MySQL**：唯一持久化出口。
+- **→ `spark/`**：Spark 从 `review` 取数做统计/情感基线/LDA；阶段四的 C-BAT-05 与 Spark 的
+  MLlib 情感是"基线 + 增强"关系（同一批评论、两种方法，可做对比实验），互不替代。
+- **→ `app/llm/`**：阶段四的调用封装、Prompt 与校验层；`app/batch/` 只负责业务编排与写库。
+- **→ `scripts/`**：`verify_cleaned.py`（阶段二产物）、`verify_phase4.py`（阶段四 29 项验收）、`check_env.py`。
+- **← `app/config.py`**：所有路径、数据库与 DeepSeek 配置均来自 `settings`，**代码内无绝对路径、无密钥**。
 
 ## 9. 当前已实现 / 未实现
 
-**已实现**：`C-BAT-01`～`C-BAT-04`（阶段一 + 阶段二，均已实测跑通全量）
-- 阶段一：`spot` 837 行、`review` 59,033 行全量导入，18 项校验全部通过
-- 阶段二：清洗产物 59,033 行 × 23 列，丢弃 0 / 异常 0，关键口径 9 项与设计实测值完全一致
+**已实现**：`C-BAT-01`～`C-BAT-07` 全部七个组件。
+- 阶段一：`spot` 837 行、`review` 59,033 行全量导入，18 项校验通过
+- 阶段二：清洗产物 59,033 行 × 23 列，丢弃 0 / 异常 0
+- 阶段四：C-BAT-05/06/07 代码完成，mock 小样本与全量压测通过（34 项验证全绿），
+  **真实 API 调用待 `.env` 填入 Key 后执行小样本**
 
-**未实现**：`C-BAT-05`（DeepSeek 语义抽取）、`C-BAT-06`（事实包构造）、`C-BAT-07`（景点评价生成）——阶段五。
+**未实现（不在本目录范围）**：Flask 业务接口（26 个）、5 个前端页面 —— 属后续阶段。
 
-> **分词不在本目录实现**（已定论）：中文分词、停用词过滤、TF-IDF 归 Spark 的 `C-SPK-03`，
-> Python 侧只做清洗、规范化、质量控制与分层标记。
+> **分词不在本目录实现**（已定论）：中文分词、停用词过滤、TF-IDF 归 Spark 的 `C-SPK-03`。
+> **统计数字不由模型计算**（阶段四纪律）：评论量/评分/占比一律由 SQL 聚合或读取 Spark 结果，
+> DeepSeek 只做语言组织与语义理解。
 
 ## 10. 答辩时重点理解
 
@@ -139,3 +162,9 @@ clean_dataset.py
 3. **为什么 `ip_province` 有 2022-08 这条时间线**：携程自 2022-08 起才展示 IP，此前 100% 为"未知"——不设这条线，客源地分析会被"未知"污染。
 4. **断点续跑怎么实现**：`review` 以 `comment_id` 为幂等键 upsert，重跑不产生重复行；`analysis_task` / `task_log` 记录每次执行的任务与每一步的处理量。
 5. **两个脚本为什么分开**：阶段一解决"数据进得来"，阶段二解决"数据可解释、可复用、可复核"，且阶段二**不动已入库的核心数据**，降低风险。
+6. **阶段四为什么把"事实"和"解释"分开**：C-BAT-06 的事实包全部由 SQL 聚合（评论量、评分、占比、样本量），
+   DeepSeek 只在 C-BAT-07 里把这些数字组织成自然语言。这样即使模型输出流畅，也无法改数——
+   数字一致性校验（误差 > 0.5 个百分点即标记 `need_review=1`）是强制关卡。
+7. **短评为什么优先走规则**：正文 ≤10 字的评论（10,228 条）信息量不足以支撑方面抽取，
+   规则判定可解释、可复现，并直接省掉 1 万次模型调用；重复正文（4,239 条 / 1,285 组）
+   组内只调一次代表，其余复用（实测只调 585 次）。
