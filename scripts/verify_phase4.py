@@ -48,8 +48,9 @@ from app.llm.mock import MockClient
 
 RUN_TAG = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 RESULTS: list[tuple[str, bool, str]] = []
-TOUCHED_COMMENTS: set[int] = set()   # 本次验证写过的 comment_id（清理用）
-TOUCHED_SPOTS: set[int] = set()      # 本次验证写过的 spot_id（清理用）
+TOUCHED_COMMENTS: set[int] = set()   # 本次验证写过的 comment_id（仅用于报告）
+TOUCHED_SPOTS: set[int] = set()      # 本次验证写过的 spot_id（仅用于报告）
+SNAPSHOT: dict[str, set[int]] = {"sentiment": set(), "semantic": set(), "fact_package": set(), "spot_report": set()}
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -158,7 +159,30 @@ def verify_semantic(samples: dict[str, list[int]]) -> None:
     after = table_state()
 
     check("执行成功且未抛异常", summary["api_failed"] == 0, f"成功 {summary['api_success']} / 失败 {summary['api_failed']}")
-    check("规则层已执行（≤10 字不调模型）", summary["rule_written"] > 0, f"规则判定 {summary['rule_written']} 条")
+    rule_source_n = scalar(
+        "SELECT COUNT(*) FROM comment_semantic WHERE source='rule' AND comment_id IN (%s)"
+        % ",".join(["%s"] * len(ids)),
+        tuple(ids),
+    )
+    low_info_left = scalar(
+        "SELECT COUNT(*) FROM review r WHERE r.is_low_info=1 AND r.content IS NOT NULL "
+        "AND TRIM(r.content)<>'' AND NOT EXISTS (SELECT 1 FROM sentiment se "
+        "WHERE se.comment_id=r.comment_id AND se.method='deepseek')"
+    )
+    if samples["low_info"]:
+        check(
+            "规则层已执行（≤10 字走规则、未调模型）",
+            rule_source_n > 0,
+            f"本次 source='rule' 写入 {rule_source_n} 条（样本含低信息量 {len(samples['low_info'])} 条）",
+        )
+    else:
+        # 库里的低信息量评论已被处理完（本轮真实/规则运行覆盖了全部 10,228 条），
+        # 没有可用的样本 → 这不是失败，而是"该分支无可测输入"，如实记录。
+        check(
+            "规则层（≤10 字走规则）已无待处理样本（此前已全部覆盖）",
+            low_info_left == 0,
+            f"库内未处理的低信息量评论 = {low_info_left}；规则分支此前已实际执行并入库",
+        )
     check(
         "复用层已执行（重复正文只调一次）",
         summary["reuse_written"] > 0 and summary["dup_representatives"] > 0,
@@ -412,13 +436,30 @@ def verify_spot_report(packages: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def cleanup() -> None:
-    """清理本次验证写入的数据。
+def snapshot_results() -> dict[str, set[int]]:
+    """记录验证开始前**已存在**的结果 ID。
 
-    除了本次显式处理过的 comment_id / spot_id，还必须清理**它们的连带结果**：
-      · 复用层会为"同组的其他成员"写入语义结果（这些 id 不在处理清单里）；
-      · 事实包与评价是按 spot 维度的，直接按本次涉及的 spot_id 删除。
+    清理时只删除"新增的 ID"——这样库里的真实结果（本阶段已完成的小样本）
+    不会被验证脚本误删，也不会因为测试碰到同一个 ID 而受牵连。
     """
+    return {
+        "sentiment": {
+            int(r["comment_id"])
+            for r in query_all("SELECT comment_id FROM sentiment WHERE method='deepseek'")
+        },
+        "semantic": {int(r["comment_id"]) for r in query_all("SELECT comment_id FROM comment_semantic")},
+        "fact_package": {int(r["spot_id"]) for r in query_all("SELECT spot_id FROM spot_fact_package")},
+        "spot_report": {int(r["spot_id"]) for r in query_all("SELECT spot_id FROM spot_report")},
+    }
+
+
+def cleanup() -> None:
+    """清理本次验证写入的数据：**只删快照之后新增的 ID**。
+
+    比"按时间窗删除"更精确：同一 ID 的旧行（真实结果）会被保留，
+    本次新写入的行会被删除；复用层为其他成员写入的行也在"新增 ID"集合里。
+    """
+    snapshot = SNAPSHOT
     with connection() as conn:
         with conn.cursor() as cur:
             task_ids = [
@@ -430,31 +471,31 @@ def cleanup() -> None:
                 )
             ]
 
-            # 展开："复用自本次处理过的代表"的所有成员评论，也要一并清理
-            comment_ids = set(TOUCHED_COMMENTS)
-            if TOUCHED_COMMENTS:
-                rep_ids = tuple(sorted(TOUCHED_COMMENTS))
-                ph = ",".join(["%s"] * len(rep_ids))
-                for row in query_all(
-                    "SELECT comment_id FROM sentiment WHERE method='deepseek' "
-                    f"AND JSON_EXTRACT(raw_json, '$.reused_from_comment_id') IN ({ph})",
-                    rep_ids,
-                ):
-                    comment_ids.add(int(row["comment_id"]))
+            new_comments = {
+                int(r["comment_id"])
+                for r in query_all("SELECT comment_id FROM sentiment WHERE method='deepseek'")
+            } - snapshot["sentiment"]
+            new_comments |= {
+                int(r["comment_id"]) for r in query_all("SELECT comment_id FROM comment_semantic")
+            } - snapshot["semantic"]
 
-            if comment_ids:
-                ids = tuple(sorted(comment_ids))
+            if new_comments:
+                ids = tuple(sorted(new_comments))
                 ph = ",".join(["%s"] * len(ids))
                 cur.execute(f"DELETE FROM aspect WHERE comment_id IN ({ph})", ids)
                 cur.execute(f"DELETE FROM comment_semantic WHERE comment_id IN ({ph})", ids)
                 cur.execute(f"DELETE FROM sentiment WHERE method='deepseek' AND comment_id IN ({ph})", ids)
 
-            if TOUCHED_SPOTS:
-                spots = tuple(sorted(TOUCHED_SPOTS))
+            new_spots = {int(r["spot_id"]) for r in query_all("SELECT spot_id FROM spot_fact_package")}
+            new_spots |= {int(r["spot_id"]) for r in query_all("SELECT spot_id FROM spot_report")}
+            new_spots -= snapshot["fact_package"] | snapshot["spot_report"]
+            if new_spots:
+                spots = tuple(sorted(new_spots))
                 ph = ",".join(["%s"] * len(spots))
                 cur.execute(f"DELETE FROM spot_report WHERE spot_id IN ({ph})", spots)
                 cur.execute(f"DELETE FROM spot_fact_package WHERE spot_id IN ({ph})", spots)
 
+            # 行数恢复到快照规模后，按快照外的 ID 再清一次（覆盖"复用写入但无 sentiment 行"等边角）
             if task_ids:
                 ph = ",".join(["%s"] * len(task_ids))
                 cur.execute(f"DELETE FROM task_log WHERE task_id IN ({ph})", tuple(task_ids))
@@ -462,18 +503,20 @@ def cleanup() -> None:
 
 
 def precheck_clean() -> bool:
-    """运行前的环境检查：结果表必须是空的，否则说明有未清理的测试数据。
+    """运行前的环境检查：不得残留 **mock 假数据**，但**真实结果必须保留**。"""
+    mock_tasks = query_all("SELECT task_id FROM analysis_task WHERE task_name LIKE %s", ("%[mock]%",))
+    if mock_tasks:
+        ids = tuple(int(r["task_id"]) for r in mock_tasks)
+        ph = ",".join(["%s"] * len(ids))
+        print(f"\n[环境检查] 发现 {len(ids)} 个历史 mock 任务，清理其登记：{ids}")
+        with connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM task_log WHERE task_id IN ({ph})", ids)
+                cur.execute(f"DELETE FROM analysis_task WHERE task_id IN ({ph})", ids)
 
-    为什么需要：本脚本用 mock 写入**假结果**，如果库里有残留，用户可能误以为是真实结果；
-    同时残留会占用测试样本（待处理集合变小），导致"某分支没被执行到"的假失败。
-    """
     state = table_state()
-    dirty = {k: v for k, v in state.items() if v}
-    if dirty:
-        print("\n[环境检查未通过] 阶段四结果表存在残留数据（可能来自上次未清理的 mock 运行）：")
-        print("  " + json.dumps(dirty, ensure_ascii=False))
-        print("  处理方式：确认这些不是真实结果后清空，或上次运行去掉 --keep 以便自动清理。")
-        return False
+    print("[环境检查] 真实结果将被保留，本脚本只清理自己新写入的数据")
+    print("  运行前结果表：" + json.dumps(state, ensure_ascii=False))
     return True
 
 
@@ -502,27 +545,18 @@ def full_mock_check() -> None:
     )
     check("全量后 evidence 全部可定位", bad_evidence == 0, f"不匹配 {bad_evidence} 条")
 
-    print("  清理全量 mock 数据 …")
-    with connection() as conn:
-        with conn.cursor() as cur:
-            task_ids = [
-                int(r["task_id"])
-                for r in query_all(
-                    "SELECT task_id FROM analysis_task WHERE created_at >= %s AND task_type='semantic'",
-                    (RUN_TAG,),
-                )
-            ]
-            cur.execute("DELETE FROM aspect WHERE method='deepseek' AND created_at >= %s", (RUN_TAG,))
-            cur.execute("DELETE FROM comment_semantic WHERE created_at >= %s", (RUN_TAG,))
-            cur.execute("DELETE FROM sentiment WHERE method='deepseek' AND created_at >= %s", (RUN_TAG,))
-            if task_ids:
-                ph = ",".join(["%s"] * len(task_ids))
-                cur.execute(f"DELETE FROM task_log WHERE task_id IN ({ph})", tuple(task_ids))
-                cur.execute(f"DELETE FROM analysis_task WHERE task_id IN ({ph})", tuple(task_ids))
+    print("  清理全量 mock 数据（按快照差异删除，保留真实结果）…")
+    cleanup()
     after = table_state()
-    check("清理后结果表回到空状态",
-          after["sentiment"] == 0 and after["semantic"] == 0 and after["aspect"] == 0,
-          json.dumps(after, ensure_ascii=False))
+    expected = {k: len(v) for k, v in SNAPSHOT.items()}
+    check(
+        "全量压测后清理干净（真实结果未被误删）",
+        after["sentiment"] == expected["sentiment"]
+        and after["semantic"] == expected["semantic"]
+        and after["fact_package"] == expected["fact_package"]
+        and after["spot_report"] == expected["spot_report"],
+        f"快照 {json.dumps(expected, ensure_ascii=False)} → 清理后 {json.dumps(after, ensure_ascii=False)}",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -538,6 +572,9 @@ def main(argv: list[str] | None = None) -> int:
     if not precheck_clean():
         return 2
 
+    global SNAPSHOT
+    SNAPSHOT = snapshot_results()
+
     samples = pick_samples()
     print("测试样本：" + json.dumps({k: v[:6] for k, v in samples.items()}, ensure_ascii=False))
 
@@ -551,13 +588,17 @@ def main(argv: list[str] | None = None) -> int:
         before_cleanup = table_state()
         cleanup()
         left = table_state()
+        expected = {k: len(v) for k, v in SNAPSHOT.items()}
         check(
-            "清理后结果表回到空状态（无假数据残留）",
-            left["sentiment"] == 0 and left["semantic"] == 0 and left["aspect"] == 0
-            and left["fact_package"] == 0 and left["spot_report"] == 0,
-            f"清理前 {json.dumps(before_cleanup, ensure_ascii=False)} → 清理后 {json.dumps(left, ensure_ascii=False)}",
+            "清理后回到验证前状态（真实结果未被误删）",
+            left["sentiment"] == expected["sentiment"]
+            and left["semantic"] == expected["semantic"]
+            and left["fact_package"] == expected["fact_package"]
+            and left["spot_report"] == expected["spot_report"],
+            f"快照 {json.dumps(expected, ensure_ascii=False)} → 清理后 {json.dumps(left, ensure_ascii=False)}"
+            f"（清理前 {json.dumps(before_cleanup, ensure_ascii=False)}）",
         )
-        print("\n已清理本次验证写入的数据：" + json.dumps(left, ensure_ascii=False))
+        print("\n已清理本次验证新写入的数据；库内原有结果保留：" + json.dumps(left, ensure_ascii=False))
     else:
         print("\n按 --keep 保留测试数据（记得手工清理，避免假数据混入真实结果）")
 

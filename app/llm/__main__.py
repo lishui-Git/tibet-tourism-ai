@@ -58,6 +58,10 @@ def _guard_scale(args: argparse.Namespace) -> None:
     """
     if args.yes or args.dry_run or args.stage == "check":
         return
+    # `--only-ids` / `--spot-ids` 是**显式枚举**的目标集合，规模由用户自己写死，
+    # 不存在"不小心全量"的风险，因此不需要二次确认（否则失败补跑会被卡住）。
+    if args.only_ids or args.spot_ids:
+        return
     if args.stage in {"semantic", "all"} and not args.limit:
         raise SystemExit(
             "[需要确认] C-BAT-05 未指定 --limit，将对全库约 4.7 万条评论发起调用。\n"

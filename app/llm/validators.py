@@ -84,11 +84,22 @@ class SemanticResult:
     aspects: list[dict[str, str]] = field(default_factory=list)   # aspect 表
     keywords: str | None = None                     # comment_semantic.keywords（逗号分隔）
     summary: str | None = None                      # comment_semantic.summary
-    dropped_aspects: int = 0                        # 被丢弃的方面数（质量统计）
+    dropped_aspects: list[dict[str, str]] = field(default_factory=list)  # 被丢弃的方面 + 原因
     repairs: list[str] = field(default_factory=list)  # 做过的规范化动作（如实记录）
+    raw_text: str = ""                              # 模型原始返回（写入 raw_json.model_raw，便于复核）
+    validation_reason: str = ""                     # 整个结果被判 is_valid=0 的原因（空表示通过）
+
+    @property
+    def dropped_aspect_count(self) -> int:
+        return len(self.dropped_aspects)
 
     def as_raw_json(self) -> dict[str, Any]:
-        """写入 `sentiment.raw_json` 的复核信息（含校验过程的痕迹）。"""
+        """写入 `sentiment.raw_json` 的复核信息。
+
+        包含 `model_raw`（模型原始返回文本）与 `dropped_aspects`（被校验拦下的方面及原因）：
+        设计上 `raw_json` 的用途就是"便于复核与复现"，若只留校验后的结果，
+        事后将无法判断"模型当时到底编了什么"。
+        """
         return {
             "polarity": self.polarity,
             "intensity": self.intensity,
@@ -98,6 +109,8 @@ class SemanticResult:
             "summary": self.summary,
             "dropped_aspects": self.dropped_aspects,
             "repairs": self.repairs,
+            "model_raw": self.raw_text[:1000],
+            "validation_reason": self.validation_reason,
         }
 
 
@@ -112,11 +125,18 @@ def _evidence_is_substring(evidence: str, content: str) -> bool:
     return squeeze(evidence) in squeeze(content)
 
 
-def validate_semantic(raw_text: str, content: str, *, max_aspects: int = 5) -> SemanticResult:
+def validate_semantic(
+    raw_text: str,
+    content: str,
+    *,
+    max_aspects: int = 5,
+    return_raw: bool = False,
+) -> SemanticResult | tuple[SemanticResult, str]:
     """校验并规范化一次语义分析返回。
 
     :param raw_text: 模型返回的原始文本（允许带 ``` 围栏，由调用方先做 `extract_json_text`）
     :param content:  评论正文（用于 evidence 子串校验）
+    :param return_raw: 为 True 时返回 `(结果, 模型原始文本)`，供写库时留档复核
     :raises ValidationError: JSON 结构完全不可用（调用方重试/记失败）
     """
     import json
@@ -129,12 +149,14 @@ def validate_semantic(raw_text: str, content: str, *, max_aspects: int = 5) -> S
         raise ValidationError("顶层结构不是 JSON 对象")
 
     repairs: list[str] = []
+    validation_reason = ""
 
     # ① polarity：枚举不合法 → 判 neutral 并标记 is_valid=0（§15.A.4 第 2 条）
     polarity = str(data.get("polarity") or "").strip().lower()
     is_valid = 1
     if polarity not in POLARITIES:
-        repairs.append(f"polarity 非法({polarity or '空'}) → neutral, is_valid=0")
+        validation_reason = f"polarity 非法({polarity or '空'}) → neutral, is_valid=0"
+        repairs.append(validation_reason)
         polarity = "neutral"
         is_valid = 0
 
@@ -148,26 +170,39 @@ def validate_semantic(raw_text: str, content: str, *, max_aspects: int = 5) -> S
 
     # ③ aspects：方面名须在候选列表；**evidence 必须是原文子串**，否则丢弃该项
     aspects: list[dict[str, str]] = []
-    dropped = 0
+    dropped: list[dict[str, str]] = []
     seen: set[str] = set()
     raw_aspects = data.get("aspects")
     if isinstance(raw_aspects, list):
         for item in raw_aspects:
             if not isinstance(item, dict):
-                dropped += 1
+                dropped.append({"aspect": str(item)[:32], "evidence": "", "reason": "数组元素不是对象"})
                 continue
             name = str(item.get("aspect") or "").strip()
-            if name not in ASPECT_CANDIDATES or name in seen or len(aspects) >= max_aspects:
-                dropped += 1
+            if name not in ASPECT_CANDIDATES:
+                dropped.append({"aspect": name[:32], "evidence": "", "reason": "方面名不在候选列表"})
+                continue
+            if name in seen:
+                dropped.append({"aspect": name[:32], "evidence": "", "reason": "方面重复"})
+                continue
+            if len(aspects) >= max_aspects:
+                dropped.append({"aspect": name[:32], "evidence": "", "reason": f"超过上限 {max_aspects} 个"})
                 continue
             aspect_polarity = str(item.get("polarity") or "").strip().lower()
             if aspect_polarity not in POLARITIES:
-                dropped += 1
+                dropped.append({"aspect": name[:32], "evidence": "", "reason": "方面极性非法"})
                 continue
-            evidence = _truncate(str(item.get("evidence") or ""), EVIDENCE_MAX_CHARS)
+            evidence_raw = str(item.get("evidence") or "")
+            evidence = _truncate(evidence_raw, EVIDENCE_MAX_CHARS)
             if not _evidence_is_substring(evidence, content):
-                # 关键校验：证据无法在原文中定位 → 视为编造，弃用该方面
-                dropped += 1
+                # 关键校验：证据无法在原文中定位 → 视为编造，弃用该方面（同时留档，便于复核模型行为）
+                dropped.append(
+                    {
+                        "aspect": name[:32],
+                        "evidence": evidence_raw[:60],
+                        "reason": "evidence 不是评论原文的子串（疑似编造依据）",
+                    }
+                )
                 continue
             aspects.append(
                 {
@@ -178,7 +213,7 @@ def validate_semantic(raw_text: str, content: str, *, max_aspects: int = 5) -> S
             )
             seen.add(name)
     elif raw_aspects is not None:
-        dropped += 1
+        dropped.append({"aspect": "", "evidence": "", "reason": "aspects 不是数组"})
         repairs.append("aspects 不是数组，已按空数组处理")
 
     # ④ keywords：数量 ≤5、每项 ≤10 字
@@ -194,7 +229,7 @@ def validate_semantic(raw_text: str, content: str, *, max_aspects: int = 5) -> S
     # ⑤ summary：≤40 字
     summary = _truncate(str(data.get("summary") or ""), SUMMARY_MAX_CHARS) or None
 
-    return SemanticResult(
+    result = SemanticResult(
         polarity=polarity,
         intensity=intensity,
         is_valid=is_valid,
@@ -203,7 +238,10 @@ def validate_semantic(raw_text: str, content: str, *, max_aspects: int = 5) -> S
         summary=summary,
         dropped_aspects=dropped,
         repairs=repairs,
+        raw_text=raw_text,
+        validation_reason=validation_reason,
     )
+    return (result, raw_text) if return_raw else result
 
 
 # ---------------------------------------------------------------------------
@@ -249,8 +287,10 @@ def rule_based_semantic(content: str) -> SemanticResult:
         aspects=[],
         keywords=",".join(keywords) if keywords else None,
         summary=_truncate(text, SUMMARY_MAX_CHARS) or None,
-        dropped_aspects=0,
+        dropped_aspects=[],
         repairs=repairs,
+        raw_text="",  # 规则层未调用模型，因此没有"模型原始返回"
+        validation_reason="",
     )
 
 

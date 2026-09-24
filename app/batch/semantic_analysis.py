@@ -268,6 +268,33 @@ def build_rule_record(row: dict) -> dict[str, Any]:
     }
 
 
+def _build_api_record(row: dict, result: SemanticResult, usage: dict[str, int] | None = None) -> dict[str, Any]:
+    """把一次成功的模型调用结果整理成待写库记录。
+
+    注意旧版本兼容：`validate_semantic` 现在返回结构化对象，`result` 也可能是
+    `(SemanticResult, raw_text)` 元组（保留 `return_raw=True` 的调用方式）。
+
+    `usage` 一并写入 `raw_json`：否则"本次真实花了多少 token"只存在于进程内存里，
+    事后无法仅凭数据库复核费用（论文的实验成本章节需要这个依据）。
+    """
+    if isinstance(result, tuple):
+        result, _ = result
+    raw = {
+        "source": "deepseek",
+        "prompt_version": SEMANTIC_PROMPT_VERSION,
+        **result.as_raw_json(),
+    }
+    if usage:
+        raw["usage"] = {k: int(v or 0) for k, v in usage.items()}
+    return {
+        "comment_id": row["comment_id"],
+        "spot_id": row["spot_id"],
+        "result": result,
+        "source": "deepseek",
+        "raw": raw,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 四、调用与校验（④ 正常调用）
 # ---------------------------------------------------------------------------
@@ -349,19 +376,7 @@ def call_batch(
                 continue
             if response is not None:
                 stats.record_success(response)
-            records.append(
-                {
-                    "comment_id": row["comment_id"],
-                    "spot_id": row["spot_id"],
-                    "result": result,
-                    "source": "deepseek",
-                    "raw": {
-                        "source": "deepseek",
-                        "prompt_version": SEMANTIC_PROMPT_VERSION,
-                        **result.as_raw_json(),
-                    },
-                }
-            )
+            records.append(_build_api_record(row, result, response.usage if response else None))
     return records, failures
 
 
@@ -416,7 +431,7 @@ def write_records(conn, records: Sequence[dict[str, Any]], stats: SemanticStats)
         if aspect_rows:
             cur.executemany(ASPECT_UPSERT_SQL, aspect_rows)
 
-    stats.aspects_dropped += sum(rec["result"].dropped_aspects for rec in records)
+    stats.aspects_dropped += sum(len(rec["result"].dropped_aspects) for rec in records)
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +543,15 @@ def run_semantic_analysis(
     }
     if dry_run:
         return summary
+
+    # 把"本轮为何没事干"说清楚，避免误以为程序坏了：
+    # `--limit N` 的语义是"处理接下来的 N 条待处理数据"，而不是"反复处理同一批 N 条"。
+    if plan.stats.api_calls_planned == 0 and not plan.rule_rows and not plan.reuse_rows:
+        print(
+            f"      本次没有需要处理的数据（库内已有 deepseek 结果 {already_done} 条）。\n"
+            f"      --limit N 处理的是「接下来的 N 条待处理数据」，重跑会继续往后推进；\n"
+            f"      若要验证幂等跳过，请用 --only-ids <comment_id,...> 指定已处理过的评论。"
+        )
 
     # ---- 真实/模拟执行：登记任务 → 规则层 → 调用层 → 复用层 → 收尾 ----------
     task_name = "评论语义分析（C-BAT-05%s）" % ("[mock]" if mock else "")
@@ -715,6 +739,8 @@ def _write_reuse_rows(conn, reuse_rows: Sequence[tuple[dict, dict]], stats: Sema
                         "source": "reuse",
                         "prompt_version": SEMANTIC_PROMPT_VERSION,
                         "reused_from_comment_id": rep_id,
+                        # 复用不产生新的 API 费用，因此 usage 记为 0（便于成本核算时区分）
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                     },
                 }
             )
