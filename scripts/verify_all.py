@@ -49,6 +49,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_write_recovery.py", "写库失败兜底（注入写库失败 → 只重试写库、落盘待补，不重新调用模型）", False),
     ("test_replay.py", "恢复补写（已付费结果零成本写回库；成功后才删凭证）", False),
     ("test_fact_package.py", "事实包（C-BAT-06 零模型调用 + 幂等跳过 + 清理回基线）", False),
+    ("test_chain_handoff.py", "生产链路串联（facts 产物被 report 接住；零模型调用）", False),
     ("test_spot_report_write_failure.py", "景点评价写库失败兜底（注入写库失败 → 批次继续 + 落盘待补）", False),
     ("test_layering.py", "分层自洽性（三层互斥穷尽 + 待处理口径吻合，证明无评论被静默跳过）", False),
     ("test_cost_projection.py", "计划阶段预估一致性（preflight ↔ dry-run 数字对得上）", False),
