@@ -174,8 +174,63 @@ def main() -> int:
     check("超长问题 → 1001", r["status"] == 400 and r["body"]["code"] == 1001, f"HTTP {r['status']} code={r['body']['code']}")
 
     # ---------- 6. 落库与历史越权 ----------
-    print("\n[6] qa_record 落库与历史查询越权防护")
-    check("ask 已写入 qa_record（返回 qa_id）", len(created_qa_ids) > 0, f"qa_ids={created_qa_ids[:5]}")
+    print("\n[6] qa_record 落库与历史越权防护")
+
+    # 【本轮修正】设计 §六 写的是"问答调用失败 → 提供重试按钮；**不保存残缺记录**"，
+    # §15.E.1 流程图也是"校验通过 → 写入 qa_record"。因此**只有成功生成回答才落库**。
+    # 而默认 APP_QA_LIVE=0，所以"默认关闭"分支本来就不该有 qa_id——
+    # 本测试此前假设它会落库（与设计不符）。现在改为：
+    # 用一个**假客户端**临时开启在线路径，验证"成功 → 落库"、"失败 → 不落库"。
+    import app.llm.client as _client_mod
+    from app.config import WebSettings, settings as _settings
+    from app.llm.client import LlmError as _LlmError
+
+    class _OkClient:
+        def __init__(self, *a, **k): pass
+
+        def chat(self, *a, **k):
+            class _R:
+                content = '{"answer": "布达拉宫评论量最多。"}'
+                model = "fake"
+                usage = {"total_tokens": 0}
+                latency_ms = 0
+                attempts = 1
+            return _R()
+
+    class _BoomClient:
+        def __init__(self, *a, **k): pass
+
+        def chat(self, *a, **k):
+            raise _LlmError("模拟失败", kind="network")
+
+    _orig_web = _settings.web
+    _orig_client = _client_mod.DeepSeekClient
+    # settings 为 frozen dataclass，用 object.__setattr__ 临时替换（finally 里还原）
+    object.__setattr__(_settings, "web", WebSettings(**{**_orig_web.__dict__, "qa_live": True}))
+    try:
+        # 6a 模型失败 → 不落库（设计 §六）
+        _client_mod.DeepSeekClient = _BoomClient
+        r_fail = ask("评论量前十的景点")
+        d_fail = r_fail["data"]
+        check("模型调用失败 → reason=LLM_FAILED", d_fail.get("reason") == "LLM_FAILED", str(d_fail.get("reason")))
+        check("模型调用失败 → reached_model=True（确实尝试了）", d_fail.get("reached_model") is True, "")
+        check("模型调用失败 → 仍返回数据依据", len(d_fail.get("facts") or []) > 0, f"{len(d_fail.get('facts') or [])} 段")
+        check("模型调用失败 → **不写入 qa_record**（设计 §六：不保存残缺记录）",
+              d_fail.get("qa_id") is None and d_fail.get("saved") is False,
+              f"qa_id={d_fail.get('qa_id')} saved={d_fail.get('saved')}")
+
+        # 6b 模型成功 → 落库
+        _client_mod.DeepSeekClient = _OkClient
+        r_ok = ask("评论量前十的景点")
+        d_ok = r_ok["data"]
+        check("模型正常返回 → available=True", d_ok.get("available") is True, str(d_ok.get("available")))
+        check("模型正常返回 → **已写入 qa_record**（返回 qa_id）",
+              bool(created_qa_ids), f"qa_ids={created_qa_ids[:5]}")
+    finally:
+        _client_mod.DeepSeekClient = _orig_client
+        object.__setattr__(_settings, "web", _orig_web)
+
+    check("收尾后 qa_live 已还原为默认关闭", _settings.web.qa_live is False, str(_settings.web.qa_live))
 
     resp = client.get("/api/qa/history")
     check("未登录查历史 → 2001（HTTP 401）", resp.status_code == 401 and resp.get_json()["code"] == 2001, f"HTTP {resp.status_code}")
@@ -193,7 +248,14 @@ def main() -> int:
     hist = uclient.get("/api/qa/history").get_json()["data"]
     check("新用户历史为空（不会看到游客写入的记录）", hist["total"] == 0, f"total={hist['total']}")
 
-    uclient.post("/api/qa/ask", json={"question": "一共采集了多少条评论"})
+    # 该用户也要在"在线路径成功"时才会落库，因此同样临时开启 + 假客户端
+    object.__setattr__(_settings, "web", WebSettings(**{**_orig_web.__dict__, "qa_live": True}))
+    try:
+        _client_mod.DeepSeekClient = _OkClient
+        uclient.post("/api/qa/ask", json={"question": "一共采集了多少条评论"})
+    finally:
+        _client_mod.DeepSeekClient = _orig_client
+        object.__setattr__(_settings, "web", _orig_web)
     hist2 = uclient.get("/api/qa/history").get_json()["data"]
     check("用户提问后只看到自己的 1 条记录", hist2["total"] == 1, f"total={hist2['total']}")
     own_qa_ids = [int(item["qa_id"]) for item in hist2["items"]]

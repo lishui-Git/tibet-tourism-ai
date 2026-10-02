@@ -605,17 +605,31 @@ def should_save_record(result: dict[str, Any]) -> bool:
       · 未识别到景点 / 需补充信息（SPOT_NOT_RECOGNIZED、NEED_TWO_SPOTS）——
         属"追问提示"，还没有任何分析结果可记，**不落库**；
       · 检索无数据（NO_DATA）——没有事实依据可记，**不落库**；
-      · 模型已生成回答（成功或校验后标记）→ **落库**；
-      · 已开启生成但因调用/配置失败（LLM_FAILED / LIVE_DISABLED / API_KEY_MISSING）——
-        **落库**，因为这属于"用户提问过、系统处理过"，审计上应当留痕。
+      · 模型已生成回答（成功）→ **落库**；
+      · **模型调用失败或返回格式非法（LLM_FAILED / LLM_BAD_FORMAT）——不落库。**
 
-    这样既符合设计，也不会让 qa_record 里堆满"hi""你好"这类拒答噪音。
+    最后一条是与设计对齐时**修正过**的（此前实现选择落库，理由是"审计上留痕"）：
+    §六 失效处理表明确写着"问答调用失败 → 返回 4001 错误码与友好提示，提供重试按钮；
+    **不保存残缺记录**"，§15.E.1 的流程图也是"校验通过 → 写入 qa_record"。
+    两处都以"**回答有效**"为落库前提，所以失败时不应留下没有回答的记录。
+    同理 `LIVE_DISABLED` / `API_KEY_MISSING` 也是"没有生成任何回答"，一并归入不落库
+    （否则演示期会攒下大量空回答记录）。
     """
     qa_type = result.get("question_type")
     reason = result.get("reason")
     if qa_type == "OUT_OF_SCOPE":
         return False
-    if reason in {"SPOT_NOT_RECOGNIZED", "NEED_TWO_SPOTS", "NO_DATA", "EMPTY_QUESTION"}:
+    if reason in {
+        "SPOT_NOT_RECOGNIZED",
+        "NEED_TWO_SPOTS",
+        "NO_DATA",
+        "EMPTY_QUESTION",
+        # 以下都是"没有生成任何回答"的情形：按设计不保存残缺记录
+        "LLM_FAILED",
+        "LLM_BAD_FORMAT",
+        "LIVE_DISABLED",
+        "API_KEY_MISSING",
+    }:
         return False
     return True
 
