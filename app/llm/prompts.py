@@ -187,7 +187,45 @@ def build_compare_messages(compare_facts: dict[str, Any]) -> list[dict[str, str]
 
 
 # ---------------------------------------------------------------------------
-# 四、通用工具
+# 四、M5 智能问答 Prompt（设计 §15.E）
+# ---------------------------------------------------------------------------
+
+QA_SYSTEM_PROMPT = """你是旅游评论数据分析系统的问答助手。你只能使用"结构化事实"中给出的数据作答。
+【硬性约束】
+1. 不得使用你自身的知识补充任何事实。
+2. 引用数字必须与结构化事实完全一致，不得四舍五入后改变量级。
+3. 先回答结论，再列出依据；依据必须来自给出的结构化事实。
+4. 事实中没有涉及的内容，直接说明"数据中未涉及"，不要推测。
+5. 不得提供路线规划、票务预订、酒店、天气等实时信息；被问到时应说明能力边界。
+6. 回答不超过 600 字，用中文，不要输出 JSON。"""
+
+
+def build_qa_messages(
+    question: str,
+    question_type: str,
+    context: list[dict[str, Any]],
+    caliber_note: str,
+) -> list[dict[str, str]]:
+    """组装问答 messages（system 约束 + 结构化事实 + 用户问题）。
+
+    **只传结构化事实**（§15.E.3 / CC-3）：聚合值、占比、样本量与来源表名，
+    绝不传原始评论全集。
+    """
+    user = (
+        f"问题类型：{question_type}\n"
+        f"数据口径：{caliber_note or '（无特别口径）'}\n\n"
+        "结构化事实（每段标注来源表）：\n"
+        + json.dumps(context, ensure_ascii=False, indent=2)
+        + f"\n\n用户问题：{question}"
+    )
+    return [
+        {"role": "system", "content": QA_SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 五、通用工具
 # ---------------------------------------------------------------------------
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
@@ -231,6 +269,8 @@ __all__ = [
     "build_semantic_repair_messages",
     "build_report_messages",
     "build_compare_messages",
+    "QA_SYSTEM_PROMPT",
+    "build_qa_messages",
     "extract_json_text",
     "format_aspect_candidates",
 ]

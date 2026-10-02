@@ -24,6 +24,7 @@ CASES = [
     ("/evaluation", 200, None),
     ("/compare", 200, None),
     ("/login", 200, None),
+    ("/qa", 200, None),
     ("/tasks", 302, None),   # 未登录 → 重定向到 /login（服务端会话检查）
     # --- 静态资源（本地 vendored，运行时不依赖外网/CDN） ---
     ("/static/vendor/echarts.min.js", 200, None),
@@ -89,8 +90,9 @@ CASES = [
     ("/api/compare?spot_a=abc&spot_b=196", 400, 1001),      # 非整数
     ("/api/compare?spot_a=564&spot_b=999999999", 404, 3001),  # 景点不存在
     ("/api/compare?spot_a=564&spot_b=322", 200, 0),         # 样本悬殊 → 可靠性提示
-    # 仍未实现的接口（依赖在线模型或用户体系）应返回 404
-    ("/api/qa/ask", 404, None),        # M5 问答未实现
+    # --- M5 智能问答（默认 APP_QA_LIVE=0：只分类+检索，不调用模型） ---
+    ("/api/qa/history", 401, 2001),                          # 需登录
+    ("/api/qa/ask", 405, None),                              # 提问是 POST
 ]
 
 passed = failed = 0

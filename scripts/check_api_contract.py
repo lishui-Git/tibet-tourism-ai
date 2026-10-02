@@ -100,6 +100,8 @@ CONTRACTS: dict[str, list[str]] = {
     # 管理端接口（/api/admin/*）需管理员会话，不在本脚本覆盖范围：
     # 其返回结构与鉴权由 scripts/test_auth.py 覆盖
     # （未登录 2001 / 普通用户 2002 / 管理员 200 且用户列表不含口令哈希）。
+    # M5 问答的 POST /api/qa/ask 与历史 GET /api/qa/history 由 scripts/test_qa.py 覆盖
+    # （含分类、检索、三条不调用模型的分支、落库策略与越权防护）。
     "/api/compare?spot_a=564&spot_b=196": [
         "facts.spot_a.id", "facts.spot_a.spot_name", "facts.spot_a.review_count",
         "facts.spot_a.avg_score", "facts.spot_a.sentiment.method",

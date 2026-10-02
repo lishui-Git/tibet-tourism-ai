@@ -216,6 +216,11 @@ class WebSettings:
     # 默认关闭：对比的指标与方面由后端计算（不落库、零成本），只有解读需要模型。
     # 设计 §15.D 允许在线生成；本开关把它变成"显式开启"的能力，避免误消费。
     compare_live: bool = _get_app_bool("COMPARE_LIVE", False)
+    # 智能问答（M5）是否允许**在线**调用模型。
+    # 默认关闭：问题分类、景点识别与事实检索全部由本系统完成（零成本），
+    # 只有"把结构化事实组织成自然语言回答"需要模型（设计 §15.E.1 的 M 步）。
+    # 关闭时返回检索到的事实 + 明确的不可用原因，前端仍能看到数据依据。
+    qa_live: bool = _get_app_bool("QA_LIVE", False)
 
 
 @dataclass(frozen=True)

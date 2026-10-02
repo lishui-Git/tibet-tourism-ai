@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}智能问答 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}M5 智能问答：先分类检索，再由系统给出回答（本系统不是聊天机器人）{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>提问</h2>
+  <p class="hint">
+    系统只回答<strong>基于评论数据分析结果</strong>的问题。提问会先做
+    <strong>问题分类</strong>与<strong>事实检索</strong>（这两步零模型成本）；
+    只有"把结构化事实组织成自然语言"才需要模型，且由
+    <code>APP_QA_LIVE</code> 控制（当前默认关闭）。
+  </p>
+  <p class="hint">
+    <input id="qa-question" type="text" placeholder="例如：布达拉宫怎么样 / 评论量前十的景点 / 一共采集了多少条评论" maxlength="200" />
+    <button id="btn-ask" type="button">提问</button>
+  </p>
+  <p class="hint">
+    可回答范围示例：
+    <span class="kw chip" data-q="布达拉宫怎么样">布达拉宫怎么样</span>
+    <span class="kw chip" data-q="布达拉宫和纳木措景区哪个好">布达拉宫和纳木措景区哪个好</span>
+    <span class="kw chip" data-q="评论量前十的景点">评论量前十的景点</span>
+    <span class="kw chip" data-q="一共采集了多少条评论">一共采集了多少条评论</span>
+    <span class="kw chip" data-q="游客最关注哪些方面">游客最关注哪些方面</span>
+    <span class="kw chip" data-q="帮我规划一条西藏7日游路线">帮我规划一条西藏7日游路线（超范围→拒答）</span>
+  </p>
+  <div id="qa-body"></div>
+</section>
+
+<section class="card">
+  <h2>三条"不调用模型"的分支（答辩要点）</h2>
+  <table class="data-table">
+    <thead><tr><th class="th-plain">分支</th><th class="th-plain">触发条件</th><th class="th-plain">系统行为</th></tr></thead>
+    <tbody>
+      <tr><td>①</td><td>问题超出六类范围（路线／天气／订票…）</td><td><strong>直接拒答</strong>并说明可回答范围，不检索、不调用模型、不落库</td></tr>
+      <tr><td>②</td><td>需要景点但没识别出景点名</td><td>提示补充景点名称，不调用模型、不落库</td></tr>
+      <tr><td>③</td><td>检索不到任何相关事实</td><td>如实说明"数据中没有相关信息"，<strong>不编造</strong>，不调用模型、不落库</td></tr>
+    </tbody>
+  </table>
+  <p class="hint">
+    因此本系统的模型**没有任何"自己知道答案"的场合**：上下文只含数据库里的结构化分析结果。
+  </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/qa.js') }}"></script>
+{% endblock %}

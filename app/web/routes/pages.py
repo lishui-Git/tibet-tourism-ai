@@ -55,6 +55,12 @@ def compare_page():
     return render_template("compare.html")
 
 
+@bp.get("/qa")
+def qa_page():
+    """M5 智能问答页。"""
+    return render_template("qa.html")
+
+
 @bp.get("/tasks")
 def tasks_page():
     """M6 任务与口径页（**需登录**）。

@@ -234,3 +234,12 @@ input[type=text] { min-width: 240px; }
 /* --- 当前登录信息 --- */
 .whoami { margin: 8px 0 12px; font-size: 14px; }
 
+/* --- 智能问答 --- */
+.chip { cursor: pointer; }
+.chip:hover { background: #dbe7f5; }
+.qa-answer {
+  background: #f8fafd; border-left: 4px solid var(--c-primary);
+  border-radius: 4px; padding: 12px 16px; margin: 12px 0;
+}
+.qa-answer p { margin: 6px 0 0; line-height: 1.9; font-size: 14px; }
+
