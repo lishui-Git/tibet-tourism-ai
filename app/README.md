@@ -35,6 +35,16 @@
 - **输出**：MySQL 库 `tibet_review`；`data/`（清洗产物，已 gitignore）；`logs/`（预留）
 - 约束：`数据采集/` 是**只读冻结区**（BR-11），任何转换结果另存新文件
 
+> **BR-11 有实测证据**：`scripts/test_source_data_readonly.py` 先从两个角度验证"冻结件只读"——
+> ① **静态扫描** `app/` 下全部 `.py`，确认不存在对 `data_dir` / `final_dataset` /
+> `spot_source` / `dup_list` 的写操作（`write_text` / `unlink` / `open('w')` 等）；
+> ② **实证** 对三份冻结件取「大小 + 修改时间」指纹，实际运行 `--stage preflight` 与
+> `--stage check` 后再比一次，断言指纹**完全一致**（实测：主数据集 118,863,050 字节，mtime 未变）；
+> ③ 另外断言 `data_dir` 与 `output_dir` / `log_dir` 是**不同目录**（产物与冻结区物理分离）。
+>
+> 这条与"Web 只读数据库"（`scripts/test_readonly_api.py`）一起，构成了本系统
+> **"两个只读"** 的完整证据链：原始数据只读、分析结果只读。
+
 ## 4. 调用关系（实测 import 图）
 
 ```
