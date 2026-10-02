@@ -9,6 +9,11 @@
     从而把"页面与接口的字段契约"变成可回归的测试。
 
 【纪律】纯本地 Flask `test_client`，只读数据库，不调用任何模型，不写库。
+
+【范围】只校验**公开**接口（无需登录）。管理端接口（§6.2 的 23–26）已按 §13.1 加管理员鉴权，
+    本脚本不带会话、无法通过，因此**不在本文件覆盖**——
+    它们的"返回结构与鉴权"由 `scripts/test_auth.py` 覆盖
+    （其中包含：未登录 2001、普通用户 2002、管理员 200 且用户列表不含口令哈希）。
 """
 
 from __future__ import annotations
@@ -92,20 +97,9 @@ CONTRACTS: dict[str, list[str]] = {
         # 当前评价尚未生产 → 走 available=false 分支；生产后应改为校验 available=true 的字段
         "spot_id", "spot_name", "available", "review_count", "caliber_note",
     ],
-    "/api/admin/tasks?limit=5": [
-        "items", "summary", "total", "caliber_note", "sample_size",
-        "items[0].task_id", "items[0].task_type", "items[0].task_name", "items[0].status",
-        "items[0].total_count", "items[0].success_count", "items[0].fail_count",
-        "items[0].skip_count", "items[0].cost_seconds", "items[0].created_at",
-    ],
-    "/api/admin/tasks/4/logs": [
-        "task", "logs", "log_count", "error_count", "caliber_note", "sample_size",
-        "logs[0].log_id", "logs[0].level", "logs[0].stage", "logs[0].message",
-        "logs[0].ref_key", "logs[0].processed_count", "logs[0].created_at",
-    ],
-    "/api/admin/caliber": [
-        "calibers", "caliber_note", "sample_size", "calibers[0].key", "calibers[0].note",
-    ],
+    # 管理端接口（/api/admin/*）需管理员会话，不在本脚本覆盖范围：
+    # 其返回结构与鉴权由 scripts/test_auth.py 覆盖
+    # （未登录 2001 / 普通用户 2002 / 管理员 200 且用户列表不含口令哈希）。
     "/api/compare?spot_a=564&spot_b=196": [
         "facts.spot_a.id", "facts.spot_a.spot_name", "facts.spot_a.review_count",
         "facts.spot_a.avg_score", "facts.spot_a.sentiment.method",

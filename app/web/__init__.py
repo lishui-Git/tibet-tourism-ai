@@ -23,6 +23,8 @@
 
 from __future__ import annotations
 
+import secrets
+
 from flask import Flask
 
 from app.config import settings
@@ -35,6 +37,17 @@ def create_app() -> Flask:
         template_folder="templates",
         static_folder="static",
         static_url_path="/static",
+    )
+
+    # 会话签名密钥：优先取 .env 的 APP_SECRET_KEY；未配置时生成一次性随机密钥
+    # （开发可跑，重启后旧登录态失效；生产/答辩演示请在 .env 配置固定值）
+    app.secret_key = settings.web.secret_key or secrets.token_hex(32)
+    # 会话 Cookie 的安全属性（§13.1）：
+    #   HttpOnly 防脚本读取；SameSite=Lax 缓解 CSRF；本地 http 环境不能强制 Secure
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_NAME="tibet_session",
     )
 
     # 中文 JSON：关闭 ASCII 转义，便于直接阅读接口返回
@@ -52,10 +65,12 @@ def create_app() -> Flask:
 
     # 注册蓝图：业务只读接口（M1 数据总览 / M2 景点分析 / M3 智能评价 / M4 对比 / M6 系统管理）
     from app.web.routes.admin import bp as admin_bp
+    from app.web.routes.auth import bp as auth_bp
     from app.web.routes.compare import bp as compare_bp
     from app.web.routes.overview import bp as overview_bp
     from app.web.routes.spots import bp as spots_bp
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(overview_bp)
     app.register_blueprint(spots_bp)
     app.register_blueprint(compare_bp)

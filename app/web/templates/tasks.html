@@ -1,8 +1,17 @@
 {% extends "base.html" %}
 {% block title %}任务与口径 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}M6 系统管理：批处理任务状态与数据口径{% endblock %}
+{% block subtitle %}M6 系统管理：批处理任务状态与数据口径（需登录）{% endblock %}
 
 {% block content %}
+<section class="card">
+  <h2>当前登录</h2>
+  <p class="hint">
+    本页需要登录（管理员）。账号由 <code>scripts/create_admin.py</code> 创建。
+  </p>
+  <div id="whoami" class="whoami"></div>
+  <button id="btn-logout" type="button" class="ghost">注销</button>
+</section>
+
 <section class="card">
   <h2>一、数据口径配置</h2>
   <p class="hint">受口径影响的接口都会在返回中原样回显这些说明（BR-10）。</p>

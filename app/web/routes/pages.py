@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, render_template
+from flask import Blueprint, redirect, render_template, url_for
+
+from app.web.routes._auth_helpers import current_user
 
 bp = Blueprint("pages", __name__)
 
@@ -55,5 +57,18 @@ def compare_page():
 
 @bp.get("/tasks")
 def tasks_page():
-    """M6 任务与口径页。"""
+    """M6 任务与口径页（**需登录**）。
+
+    服务端在渲染前检查会话：未登录直接重定向到登录页——
+    避免"页面能打开但里面每个接口都 401"的破壳体验。
+    （真正的权限边界仍在 API 层：`admin_required`，页面重定向只是体验优化。）
+    """
+    if current_user() is None:
+        return redirect(url_for("pages.login_page"))
     return render_template("tasks.html")
+
+
+@bp.get("/login")
+def login_page():
+    """登录页。"""
+    return render_template("login.html")

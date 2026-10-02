@@ -224,3 +224,13 @@ input[type=text] { min-width: 240px; }
 .up { color: var(--c-ok); font-weight: 600; }
 .down { color: var(--c-bad); font-weight: 600; }
 
+/* --- 登录页 --- */
+.login-card { max-width: 560px; }
+.login-form { display: flex; flex-direction: column; gap: 12px; margin: 14px 0; }
+.login-form label { display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; color: var(--c-muted); }
+.login-form input { padding: 9px 12px; border: 1px solid var(--c-line); border-radius: 6px; font-size: 14px; }
+.login-form button { align-self: flex-start; }
+
+/* --- 当前登录信息 --- */
+.whoami { margin: 8px 0 12px; font-size: 14px; }
+

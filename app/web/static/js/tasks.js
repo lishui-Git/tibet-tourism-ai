@@ -1,4 +1,25 @@
-/* 任务与口径页（M6）：数据口径配置 + 批处理任务与日志（只读）。 */
+/* 任务与口径页（M6）：数据口径配置 + 批处理任务与日志（只读，需管理员登录）。 */
+
+/** 显示当前登录用户，并绑定注销按钮。 */
+async function loadWhoami() {
+  const box = document.getElementById('whoami');
+  try {
+    const me = await apiGet('/api/auth/me');
+    box.innerHTML = `已登录：<strong>${escapeHtml(me.nickname || me.username)}</strong>
+      （用户名 ${escapeHtml(me.username)}，角色 <span class="tag ${me.is_admin ? 'ok' : ''}">${escapeHtml(me.role)}</span>）`;
+  } catch (e) {
+    box.innerHTML = `<div class="alert warn">未登录或会话已失效（${escapeHtml(e.message)}）。</div>`;
+  }
+}
+
+async function doLogout() {
+  try {
+    await axios.post('/api/auth/logout');
+  } catch (e) {
+    // 即使注销请求失败也回到登录页，避免停在"看起来还登录着"的状态
+  }
+  window.location.href = '/login';
+}
 
 function renderCaliber(data) {
   const items = data.calibers.map(c => {
@@ -100,8 +121,10 @@ async function loadTaskLogs(taskId) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadWhoami();
   loadCaliber();
   loadTasks();
+  document.getElementById('btn-logout').addEventListener('click', doLogout);
   document.getElementById('btn-tasks').addEventListener('click', loadTasks);
   document.getElementById('task-type').addEventListener('change', loadTasks);
 });

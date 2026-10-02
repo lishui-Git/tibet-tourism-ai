@@ -46,7 +46,10 @@
 | `routes/health.py` | 自检接口 `/healthz`（不查库）、`/api/db-ping`（查库） |
 | `routes/overview.py` | M1 数据总览接口（5 个） |
 | `routes/spots.py` | M2 景点分析 + M3 智能评价接口（9 个） |
-| `routes/admin.py` | M6 系统管理只读接口（3 个） |
+| `routes/admin.py` | M6 系统管理接口（4 个，**均需管理员**） |
+| `routes/auth.py` | 认证接口（注册/登录/注销/当前用户） |
+| `routes/_auth_helpers.py` | `login_required` / `admin_required` 装饰器与 `current_user()` |
+| `auth.py` | 口令加盐哈希（PBKDF2-HMAC-SHA256）、用户读写、登录校验 |
 | `routes/pages.py` | 页面路由（5 个页面） |
 | `templates/base.html` | 公共布局：顶部导航、页脚（含"离线生产、只读查询"的架构说明） |
 | `templates/home.html`、`overview.html`、`spots.html`、`evaluation.html`、`tasks.html` | 五个业务页面 |
@@ -61,6 +64,10 @@
 | — | GET | `/healthz` | 进程存活（不查库） | — |
 | — | GET | `/api/db-ping` | MySQL 连通性与表数量 | `C-API-13` |
 | — | GET | `/` | 骨架首页 | — |
+| 1 | POST | `/api/auth/register` | 用户注册（**一律普通用户，不可自助建管理员**） | `C-API-01` |
+| 2 | POST | `/api/auth/login` | 登录（建立会话） | `C-API-01` |
+| 3 | POST | `/api/auth/logout` | 注销（需登录） | `C-API-01` |
+| 4 | GET | `/api/auth/me` | 当前用户与角色（需登录） | `C-API-01` |
 | 5 | GET | `/api/overview/summary` | 数据集规模、评分分布、结果覆盖情况 | `C-API-02` |
 | 6 | GET | `/api/overview/trend?granularity=year\|month` | 评论量时间趋势（读 `stat_time`） | `C-API-02` |
 | 7 | GET | `/api/overview/distribution` | 评论量分档 + 来源口径构成 | `C-API-02` |
@@ -76,13 +83,13 @@
 | 17 | GET | `/api/spots/{spot_id}/reviews?limit=5` | 代表性正负面评论 | `C-API-08` |
 | 18 | GET | `/api/spots/{spot_id}/report` | **景点智能评价（含事实依据回显）** | `C-API-09` |
 | 20 | GET | `/api/compare?spot_a=&spot_b=` | **景点对比**（指标由后端算；解读默认关闭，零 API 消费） | `C-API-10` |
-| 23 | GET | `/api/admin/tasks?limit=20&task_type=` | 批处理任务列表与进度 | `C-API-14` |
-| 24 | GET | `/api/admin/tasks/{task_id}/logs` | 任务日志明细 | `C-API-14` |
-| 26 | GET | `/api/admin/caliber` | 系统数据口径配置 | `C-API-14` |
+| 23 | GET | `/api/admin/tasks` | 批处理任务列表与进度（**需管理员**） | `C-API-14` |
+| 24 | GET | `/api/admin/tasks/{task_id}/logs` | 任务日志明细（**需管理员**） | `C-API-14` |
+| 25 | GET | `/api/admin/users` | 用户列表（**需管理员**，不含口令哈希） | `C-API-14` |
+| 26 | GET | `/api/admin/caliber` | 系统数据口径配置（**需管理员**） | `C-API-14` |
 
-**尚未实现的接口（7 个，未注册路由 → 调用返回 404，属预期）**：
-1–4 认证类（`/api/auth/*`，依赖用户体系）、19 重新生成评价（需写操作 + 管理员角色）、
-21–22 问答（需**在线**调用模型）、25 用户列表（依赖用户体系）。
+**尚未实现的接口（3 个，未注册路由 → 调用返回 404，属预期）**：
+19 重新生成评价（需写操作 + 管理员角色）、21–22 问答（需**在线**调用模型）。
 
 > **接口 20（景点对比）已实现**，但它的"解读"部分默认**关闭**：
 > 对比指标、差值、样本量比、方面对比全部由后端实时计算（不落库、零成本），
@@ -90,11 +97,11 @@
 > 关闭时接口照常返回 200 与全部数据，仅 `interpretation.available=false` 并带原因——
 > 这既是"不误花钱"的保险，也正好复用设计 §15.D.3 的失败降级路径。
 
-> **为什么不先做**：19/21/22 需要"在线调用 DeepSeek"，与 §1 的只读原则冲突，
-> 必须先把调用封装、缓存与权限设计清楚；1–4/25 依赖 `sys_user` 与会话。
+> **为什么 19/21/22 先不做**：它们需要"在线调用 DeepSeek"，与 §1 的只读原则冲突，
+> 必须先把调用封装、缓存、限额与降级策略设计清楚（对比解读已经先走通了这条路）。
 > **宁可不实现，也不留"看起来有权限校验其实没有"的接口。**
 
-## 4b. 已实现的页面（5 个）
+## 4b. 已实现的页面（6 个）
 
 | 页面 | 路径 | 内容 | 依赖接口 |
 |---|---|---|---|
@@ -103,7 +110,10 @@
 | M2 景点分析 | `/spots` | 景点排行（三种排序）、关键字检索+分页、景点详情（缺失字段显式标注）、情感分布（mllib/deepseek 切换）、年度趋势、方面分析（BR-04 门槛）、LDA 主题词、代表评论 | `/api/spots/*` |
 | M3 智能评价 | `/evaluation` | 选择合格景点 → 综合评价/优势/问题/关注点 + **事实依据回显**（含事实包版本与生成时间）；数据不足时显示原因而非报错 | `/api/spots/{id}/report` |
 | M4 景点对比 | `/compare` | 选择两景点 → 指标对比表（含差值）、情感对比、方面对比（BR-04 门槛）、可靠性提示（≥10 倍样本差）；解读默认关闭并如实说明 | `/api/compare` |
-| M6 任务与口径 | `/tasks` | 数据口径配置、批处理任务列表（类型/状态/计数/耗时）、任务日志明细（含 ERROR 与处理量） | `/api/admin/*` |
+| M6 任务与口径 | `/tasks` | **需登录**（管理员）：当前登录信息与注销、数据口径配置、任务列表、任务日志明细 | `/api/auth/*`、`/api/admin/*` |
+| 登录 | `/login` | 用户名/口令登录；已登录则自动跳转到 `/tasks` | `/api/auth/login`、`/api/auth/me` |
+
+> 路由实测：**API 24 个** + 页面/自检 8 个（另有 `/static/<path>` 1 个）。
 
 **前端两条纪律**：
 1. **不引入构建链**（§10）：原生 HTML/CSS/JS + ECharts + axios，无 npm、无打包；
@@ -113,7 +123,29 @@
 未实现的页面：**M5 智能问答**——它必须在请求时调用模型（依赖用户当次提问），
 与只读原则冲突，须先设计在线调用的限额、缓存与降级策略。
 
-## 5. 口径纪律（BR-10）
+## 5. 认证与鉴权（§13.1 / §13.2）
+
+| 项 | 实现 |
+|---|---|
+| 口令存储 | **PBKDF2-HMAC-SHA256** 加盐（20 万次迭代），存储串含算法名与迭代次数，便于日后升级参数而不失效旧口令。**不引入第三方依赖**（`requirements.txt` 冻结：不加 bcrypt/passlib） |
+| 会话 | Flask 签名 Cookie（密钥 `APP_SECRET_KEY`，未配置时生成一次性随机密钥）；`HttpOnly` + `SameSite=Lax`；**只存 `user_id`** |
+| 每次请求回查 | `current_user()` 每次请求都回查 `sys_user` 确认"用户仍存在且未停用"，否则清会话——**帐号停用后旧 Cookie 立即失效**（已实测） |
+| 角色 | 注册一律 `user`；**管理员只能由 `scripts/create_admin.py` 创建**，注册接口传入 `role=admin` 会被忽略（防自助提权，已实测） |
+| 接口鉴权 | `@login_required` → 未登录 2001(401)；`@admin_required` → 未登录 2001、非管理员 2002(403) |
+| 登录失败 | 统一 2004「用户名或口令错误」，**不区分**用户是否存在（防用户名枚举，已实测） |
+| 越权防护 | 用户列表不返回 `password_hash`（已实测响应全文不含 `pbkdf2`）；管理接口全部走角色校验 |
+
+页面侧：`/tasks` 在服务端检查会话，未登录**重定向到 `/login`**（避免"页面能开但接口全 401"的破壳体验）；
+真正的权限边界始终在 API 层。登录页与「注销」按钮均已实测可用（登录 → 任务页 → 注销 → 回登录页）。
+
+**首次使用请先创建管理员**：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\create_admin.py --username admin
+# 口令交互式输入（不回显）；或 $env:APP_ADMIN_PASSWORD="……" 走非交互
+```
+
+## 6. 口径纪律（BR-10）
 
 受口径影响的返回都带 `caliber_note` 与 `sample_size`，统一在 `data_access.py` 定义，避免各处自写一套：
 
@@ -125,40 +157,45 @@
 | `CALIBER_ASPECT` | 方面样本 <10 条不出结论（BR-04） |
 | `CALIBER_THRESHOLD` | 评论量 ≥100 条才生成完整评价（BR-02/BR-03） |
 
-## 6. 如何使用
+## 7. 如何使用
 
 ```powershell
 # 启动开发服务器（读取 .env 的 FLASK_HOST / FLASK_PORT / FLASK_DEBUG）
 .\.venv\Scripts\python.exe run.py          # → http://127.0.0.1:5000/
 
+# 首次使用：创建管理员账号（口令交互式输入，不回显；不提供自助注册管理员）
+.\.venv\Scripts\python.exe scripts\create_admin.py --username admin
+
 # 接口冒烟测试（本地 test_client，不启端口、零 API 调用、零写库）
 .\.venv\Scripts\python.exe scripts\smoke_api.py
 
-# 接口字段契约校验：逐个断言"前端依赖的字段"确实存在（168 个字段）
-#   —— 冒烟测试查不出"页面取了不存在的字段"这类静默空白问题，本脚本专门补这个盲区
+# 认证与鉴权测试（口令哈希 / 注册 / 登录 / 会话 / 越权 / 停用失效；测试用户自动清理）
+.\.venv\Scripts\python.exe scripts\test_auth.py
+
+# 接口字段契约校验：逐个断言"前端依赖的字段"确实存在（仅公开接口）
 .\.venv\Scripts\python.exe scripts\check_api_contract.py
 
 # 手工抽查
 curl.exe "http://127.0.0.1:5000/api/overview/summary"
 curl.exe "http://127.0.0.1:5000/api/spots/564"
-curl.exe "http://127.0.0.1:5000/api/spots/564/sentiment?method=mllib"
 curl.exe "http://127.0.0.1:5000/api/spots/564/report"
+curl.exe "http://127.0.0.1:5000/api/compare?spot_a=564&spot_b=196"
 ```
 
-## 7. 当前进度（截至阶段四）
+## 8. 当前进度（截至阶段四）
 
 | 层 | 状态 |
 |---|---|
 | 数据层 | ✅ 阶段一导入、阶段二清洗、阶段三 Spark 全量统计（`stat_*`/`sentiment`(mllib)/`topic`） |
 | 语义层 | 🟡 阶段四 C-BAT-05～07 代码完成、32 条真实调用验证通过；**全量 47,701 次待授权** |
-| 接口层 | ✅ 自检 3 个 + 业务只读 16 个 + 页面 5 个（本文件 §4、§4b） |
-| 页面层 | 🟡 已做 5 个页面（首页 / M1 / M2 / M3 / M6）；M4 对比、M5 问答待做 |
-| 认证/权限 | ❌ 未实现（`sys_user` 表已建） |
+| 接口层 | ✅ 自检 3 个 + 业务只读 16 个 + 认证 4 个 + 管理端 4 个（本文件 §4） |
+| 页面层 | 🟡 已做 6 个页面（首页 / M1 / M2 / M3 / M4 / M6 / 登录）；M5 问答待做 |
+| 认证/权限 | ✅ 已实现（注册/登录/注销/当前用户 + 管理员接口鉴权；`sys_user` 表已启用） |
 
 > `/healthz` 的 `stage` 字段已与项目实际进度同步（阶段四）；
 > 判断进度仍以 `开发上下文索引.md` 与 `开发日报/` 为准——`stage` 只是一个概览字段。
 
-## 8. 对应项目设计中的组件
+## 9. 对应项目设计中的组件
 
 | 组件 | 说明 | 状态 |
 |---|---|---|
@@ -172,14 +209,14 @@ curl.exe "http://127.0.0.1:5000/api/spots/564/report"
 | `C-API-13` | 数据访问组件 | ✅ 已实现（`app/db.py` + `data_access.py`） |
 | `C-API-14` | 统一响应与错误处理、任务查询 | ✅ 响应封装 + 3 个只读接口 |
 
-## 9. 与其他模块的关系
+## 10. 与其他模块的关系
 
 - **→ `app/db.py` / `data_access.py`**：接口层唯一的数据库出口，所有 SQL 参数化且只读。
 - **→ `app/batch/`、`app/llm/`**：Web 只**读**它们离线写入的结果，**不调用、不触发**（批处理依赖人工运行）。
 - **→ `templates` + `static`**：展示层不直连数据库，数据一律通过 `/api/*` 获取。
 - **← `run.py`**：唯一的启动入口。
 
-## 10. 答辩时重点理解
+## 11. 答辩时重点理解
 
 1. **为什么不是每次用户查询都重新调用大模型**：本系统面向旅游评论数据集的**离线**智能分析——
    DeepSeek 负责离线把评论语义结构化并落库，Web 层只做查询、展示与组合；

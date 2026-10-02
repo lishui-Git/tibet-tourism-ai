@@ -23,7 +23,8 @@ CASES = [
     ("/spots", 200, None),
     ("/evaluation", 200, None),
     ("/compare", 200, None),
-    ("/tasks", 200, None),
+    ("/login", 200, None),
+    ("/tasks", 302, None),   # 未登录 → 重定向到 /login（服务端会话检查）
     # --- 静态资源（本地 vendored，运行时不依赖外网/CDN） ---
     ("/static/vendor/echarts.min.js", 200, None),
     ("/static/vendor/axios.min.js", 200, None),
@@ -33,6 +34,7 @@ CASES = [
     ("/static/js/spots.js", 200, None),
     ("/static/js/evaluation.js", 200, None),
     ("/static/js/compare.js", 200, None),
+    ("/static/js/login.js", 200, None),
     ("/static/js/tasks.js", 200, None),
     ("/static/css/app.css", 200, None),
     # --- 自检接口 ---
@@ -69,11 +71,17 @@ CASES = [
     ("/api/spots/564/reviews", 200, 0),
     ("/api/spots/564/reviews?limit=999", 400, 1002),
     ("/api/spots/564/report", 200, 0),
-    ("/api/admin/tasks", 200, 0),
-    ("/api/admin/tasks?task_type=semantic", 200, 0),
-    ("/api/admin/tasks/4/logs", 200, 0),
-    ("/api/admin/tasks/999999999/logs", 404, 3001),
-    ("/api/admin/caliber", 200, 0),
+    # --- M6 系统管理：已按 §13.1 加管理员鉴权，未登录应得 401/2001 ---
+    ("/api/admin/tasks", 401, 2001),
+    ("/api/admin/tasks?task_type=semantic", 401, 2001),
+    ("/api/admin/tasks/4/logs", 401, 2001),
+    ("/api/admin/users", 401, 2001),
+    ("/api/admin/caliber", 401, 2001),
+    # --- 认证接口：POST-only 的接口用 GET 访问应得 405；需登录接口未登录得 2001 ---
+    ("/api/auth/me", 401, 2001),
+    ("/api/auth/logout", 405, None),         # 注销是 POST
+    ("/api/auth/login", 405, None),          # 登录是 POST
+    ("/api/auth/register", 405, None),       # 注册是 POST
     # --- M4 景点对比（指标由后端算；解读默认关闭，零 API 消费） ---
     ("/api/compare?spot_a=564&spot_b=196", 200, 0),
     ("/api/compare?spot_a=564&spot_b=564", 400, 1002),      # 同一景点
@@ -81,7 +89,8 @@ CASES = [
     ("/api/compare?spot_a=abc&spot_b=196", 400, 1001),      # 非整数
     ("/api/compare?spot_a=564&spot_b=999999999", 404, 3001),  # 景点不存在
     ("/api/compare?spot_a=564&spot_b=322", 200, 0),         # 样本悬殊 → 可靠性提示
-    ("/api/auth/login", 404, None),       # 未实现（预期 404）
+    # 仍未实现的接口（依赖在线模型或用户体系）应返回 404
+    ("/api/qa/ask", 404, None),        # M5 问答未实现
 ]
 
 passed = failed = 0
