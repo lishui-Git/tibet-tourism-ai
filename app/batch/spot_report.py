@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Any, Sequence
 
 from app.batch.task_registry import TaskRecorder, finish_task, register_task
+from app.batch.write_recovery import write_with_retry
 from app.db import connection, query_all
 from app.llm.client import CallStats, ChatClient, LlmError
 from app.llm.prompts import REPORT_PROMPT_VERSION, build_report_messages, extract_json_text
@@ -204,23 +205,61 @@ def run_spot_report(
                 continue
 
             call_stats.record_success(_zero_usage_result(tokens))
-            with conn.cursor() as cur:
-                cur.execute(
-                    REPORT_UPSERT_SQL,
-                    (
-                        spot_id,
-                        item["version"],
-                        result.summary,
-                        json.dumps(result.advantages, ensure_ascii=False),
-                        json.dumps(result.issues, ensure_ascii=False),
-                        json.dumps(result.visitor_focus, ensure_ascii=False),
-                        settings.deepseek.model if not mock else "mock",
-                        REPORT_PROMPT_VERSION,
-                        result.need_review,
-                        tokens,
-                        task_id,
-                    ),
+
+            # 写库与"已付费结果"的保护：
+            # ① 写失败只重试写库（绝不重新调用模型），仍失败则把结果落盘待补；
+            # ② 每个景点写成功后**立刻提交**——否则整轮 57 个景点共用一个事务，
+            #    任何一次写失败都会把前面已付费的成果全部回滚（实测到的设计缺口）。
+            payload = {
+                "spot_id": spot_id,
+                "fact_package_version": item["version"],
+                "summary": result.summary,
+                "advantages": result.advantages,
+                "issues": result.issues,
+                "visitor_focus": result.visitor_focus,
+                "need_review": result.need_review,
+                "token_usage": tokens,
+                "model": settings.deepseek.model if not mock else "mock",
+            }
+
+            def _do_write(_payload=payload) -> None:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        REPORT_UPSERT_SQL,
+                        (
+                            _payload["spot_id"],
+                            _payload["fact_package_version"],
+                            _payload["summary"],
+                            json.dumps(_payload["advantages"], ensure_ascii=False),
+                            json.dumps(_payload["issues"], ensure_ascii=False),
+                            json.dumps(_payload["visitor_focus"], ensure_ascii=False),
+                            _payload["model"],
+                            REPORT_PROMPT_VERSION,
+                            _payload["need_review"],
+                            _payload["token_usage"],
+                            task_id,
+                        ),
+                    )
+
+            outcome = write_with_retry(
+                _do_write,
+                prefix="spot_report",
+                entries=[{"text": f"spot_id={spot_id} version={item['version']}", "payload": payload}],
+                shard_key=spot_id,
+                on_retry=lambda attempt, exc: print(f"      [写库重试] 第 {attempt} 次失败：{exc}"),
+            )
+            if not outcome.ok:
+                # 不静默丢数据：记失败、写 task_log、结果已落盘待补
+                stats.failed += 1
+                where = outcome.recovery_path.name if outcome.recovery_path else "（磁盘不可写，未能落盘）"
+                recorder.error(
+                    "景点评价-写库",
+                    f"第 {spot_id} 号景点评价写库失败（{outcome.last_error}）；"
+                    f"已付费结果落盘待补：{where}",
+                    ref_key=str(spot_id),
                 )
+                continue
+            conn.commit()   # 逐景点提交：把断点粒度缩到一个景点
             stats.generated += 1
             stats.need_review += result.need_review
             stats.number_mismatches += len(result.number_mismatches)

@@ -33,14 +33,19 @@ sys.path.insert(0, ".")
 from app.batch.semantic_analysis import (
     RECOVERY_DIR,
     SemanticStats,
-    _recovery_path,
     payload_to_record,
     write_records_safely,
 )
+from app.batch.write_recovery import recovery_path
 from app.db import DatabaseError, connection, query_one
 from app.llm.validators import SemanticResult
 
 RESULTS: list[tuple[str, bool, str]] = []
+
+
+def _recovery_path(comment_id: int):
+    """语义结果的落盘路径（统一由共享模块按 `comment_id % 100` 分片）。"""
+    return recovery_path("semantic", comment_id)
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -279,7 +284,11 @@ def main() -> int:
         lines = [ln for ln in recovery_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
     check("恢复文件包含该条记录", len(lines) == 1, f"行数={len(lines)}")
     if lines:
-        payload = json.loads(lines[0])
+        # 统一结构：每行是 {"text": 可读摘要, "payload": 可写库业务数据}
+        entry = json.loads(lines[0])
+        check("落盘结构统一为 {text, payload}", "text" in entry and "payload" in entry,
+              f"keys={sorted(entry.keys())}")
+        payload = entry["payload"]
         usage_tokens = (payload.get("raw") or {}).get("usage", {}).get("total_tokens")
         check("落盘内容含核心字段（极性/方面/来源）",
               payload["comment_id"] == comment_id

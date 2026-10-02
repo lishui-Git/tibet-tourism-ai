@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from app.batch.task_registry import TaskRecorder, chunked, finish_task, register_task
+from app.batch.write_recovery import persist_recovery
 from app.config import PROJECT_ROOT
 from app.db import DatabaseError, connection, query_all, query_one
 from app.llm.client import CallStats, ChatClient, LlmError
@@ -506,21 +507,18 @@ def payload_to_record(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _persist_recovery(records: Sequence[dict[str, Any]]) -> Path | None:
-    """把一批"已付费但写库失败"的结果追加到本地文件（尽力而为）。
+    """把一批"已付费但写库失败"的结果追加落盘（**薄封装，统一走共享模块**）。
 
-    :returns: 落盘文件路径；失败返回 None（调用方只提示，不改变主流程）。
+    保留这个函数名是为了兼容已有的调用与测试；实际写入逻辑在
+    `app/batch/write_recovery.py`，与景点评价共用同一种 JSONL 结构。
     """
     if not records:
         return None
-    try:
-        RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
-        first_path = _recovery_path(int(records[0]["comment_id"]))
-        with first_path.open("a", encoding="utf-8") as handle:
-            for payload in _records_to_payloads(records):
-                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        return first_path
-    except OSError:
-        return None
+    entries = [
+        {"text": f"comment_id={payload['comment_id']}", "payload": payload}
+        for payload in _records_to_payloads(records)
+    ]
+    return persist_recovery("semantic", entries, int(records[0]["comment_id"]))
 
 
 def _retry_write(conn, records: Sequence[dict[str, Any]], stats: "SemanticStats") -> bool:
@@ -528,6 +526,11 @@ def _retry_write(conn, records: Sequence[dict[str, Any]], stats: "SemanticStats"
 
     安全性：`write_records` 的整批操作在同一事务内，失败时 `connection()`
     会整批回滚，因此重试不会产生重复行或残留脏数据。
+
+    说明：这里保留语义分析自己的重试实现（为了在控制台打印"未重复调用模型"这类
+    面向操作者的提示），而落盘/读取统一走 `app/batch/write_recovery.py`——
+    两者共用同一种 JSONL 结构（`{"text":…, "payload":…}`），
+    避免"每个组件各写一种格式、事后无法统一补写"。
     """
     for attempt in range(2, WRITE_RETRY_ATTEMPTS + 1):
         time.sleep(WRITE_RETRY_SLEEP * attempt)
@@ -545,7 +548,7 @@ def write_records_safely(conn, records: Sequence[dict[str, Any]], stats: "Semant
 
     这是对"数据库写入失败时不要简单重复请求模型"（保险机制第 10 条）的落地：
         ① 首次写失败 → 最多重试 `WRITE_RETRY_ATTEMPTS - 1` 次（只重写，不重调）；
-        ② 仍失败 → 把结果写入 `logs/recovery/*.jsonl`，下次可零成本补写；
+        ② 仍失败 → 把结果写入 `logs/recovery/semantic_*.jsonl`，下次可零成本补写；
         ③ 全过程不改变"下次运行会重查游标"的语义——未写成功的行仍是待处理。
     """
     if not records:
@@ -559,11 +562,16 @@ def write_records_safely(conn, records: Sequence[dict[str, Any]], stats: "Semant
     if _retry_write(conn, records, stats):
         return
 
-    path = _persist_recovery(records)
+    # 落盘统一走共享模块（与景点评价共用同一 JSONL 结构，便于统一补写）
+    entries = [
+        {"text": f"comment_id={payload['comment_id']}", "payload": payload}
+        for payload in _records_to_payloads(records)
+    ]
+    path = persist_recovery("semantic", entries, int(records[0]["comment_id"]))
     if path:
         print(
             f"      [已落盘待补] {len(records)} 条已付费结果写入 {path.name}；"
-            f"下次运行会重新查询游标，且不会重复调用模型（补写方式见 app/llm/README.md §11）"
+            f"下次运行会重新查询游标，且不会重复调用模型（补写方式见 app/llm/README.md §7.1）"
         )
     else:
         print(f"      [警告] {len(records)} 条已付费结果既未写库也未落盘（磁盘不可写）")
@@ -707,6 +715,9 @@ def run_semantic_analysis(
         rule_records = [build_rule_record(row) for row in plan.rule_rows]
         for batch in chunked(rule_records, WRITE_BATCH):
             write_records(conn, batch, stats)
+            # 逐批提交：`connection()` 原本只在正常退出时提交一次，
+            # 中途任何异常都会把**已付费**的结果整批回滚——这不是"按批 commit"的断点语义（已在 db.py 文档写明）。
+            conn.commit()
             written += len(batch)
         stats.rule_written = len(rule_records)
         recorder.info(
@@ -717,6 +728,7 @@ def run_semantic_analysis(
 
         # ③ 复用层（重复组非代表成员）—— 需要代表评论已成功写库，故先查已处理代表
         first_reuse = _write_reuse_rows(conn, plan.reuse_rows, stats)
+        conn.commit()
         stats.reuse_written = first_reuse
         written += first_reuse
         recorder.info(
@@ -737,6 +749,7 @@ def run_semantic_analysis(
             stats.api_failed += len(batch_failures)
             for batch in chunked(records, WRITE_BATCH):
                 write_records_safely(conn, batch, stats)
+                conn.commit()   # 逐批提交：中断/崩溃时保住已付费的结果，重跑只补未完成部分
                 written += len(batch)
             recorder.progress(written)
             planned = len(plan.rule_rows) + stats.api_calls_planned + stats.dup_members
@@ -747,6 +760,7 @@ def run_semantic_analysis(
 
         # 调用层结束后再补一次复用：本轮新产生的代表结果可以被同组其它成员复用
         second_reuse = _write_reuse_rows(conn, plan.reuse_rows, stats)
+        conn.commit()
         stats.reuse_written += second_reuse
         written += second_reuse
 

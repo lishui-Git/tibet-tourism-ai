@@ -139,10 +139,23 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 | ③ 重试仍失败 | 把已付费结果写入 `logs/recovery/semantic_<n>.jsonl`（按 `comment_id % 100` 分片），控制台明确提示"已落盘待补" |
 | ④ 补写 | 数据未入库的评论**仍然是待处理**，下次正式运行时会被游标重新选中并按正常流程写库；落盘文件只作为"结果没丢"的凭证与人工补写依据 |
 
-> 该行为已由 `scripts/test_write_recovery.py` 固定：用注入的写库失败分别验证
-> "瞬时失败→重试成功"与"持续失败→落盘待补"，并断言**落盘内容可还原、可真正补写回库**，
-> 以及"测试本身没有改动任何业务数据"（测试前后结果表行数逐项一致）。
-> 该测试**不调用任何模型**。
+> **同一套兜底也覆盖景点评价（C-BAT-07）**：`run_spot_report` 的写库失败同样会
+> "只重试写库 → 落盘待补 → 记 `task_log`(ERROR) 并继续下一个景点"，
+> 且**每个景点写成功即提交**。共享实现见 `app/batch/write_recovery.py`，
+> 两类组件使用**同一种 JSONL 结构**（`{"text":…, "payload":…}`），因此可以用
+> `load_recovery(prefix)` 统一读出后零成本补写。
+
+> **事务粒度的修正（实测缺口）**：`connection()` 原本**只在正常退出时提交一次**，
+> 意味着 4.7 万次调用的中途任何异常都会把当轮已付费结果**全部回滚**——
+> 这与 `app/db.py` 文档里写的"按批 commit，便于断点续跑"并不一致。
+> 现已改为：规则层每批、复用层每次、调用层**每批写库后立刻 `conn.commit()`**，
+> 断点粒度 = 一个写批次（200 条）。
+
+> 该行为已由两个测试固定（均**不调用任何模型**）：
+> `scripts/test_write_recovery.py`（语义：注入写库失败 → 重试/落盘/补写闭环，
+> 并断言测试前后结果表行数逐项一致）与
+> `scripts/test_spot_report_write_failure.py`（景点评价：写失败 → 记 failed + task_log ERROR +
+> 落盘 + 任务标 partial + **批次继续**，而非整轮回滚）。
 
 ## 8. 成本控制与**实测**成本（设计 §7.4 / NR-P-07）
 
