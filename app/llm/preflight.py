@@ -36,16 +36,28 @@ CORE_TABLE_BASELINE: dict[str, dict[str, Any]] = {
     "review": {"rows": 59033, "crc32": 1060622212},
 }
 
-# 实测成本参数（32 次真实调用）：单条平均 480 token，输入/输出 ≈ 73% / 27%
+# 实测成本参数（32 次真实调用）：
+#   单条平均 **480** token（区间 431–562）
+#   输入 10,691 / 输出 4,681 / 合计 15,372  ⇒ 输入 69.5% / 输出 **30.5%**
+#
+# 【修正说明】此前这里写的是 `INPUT_SHARE=0.73 / OUTPUT_SHARE=0.27`，
+# 但用实测汇总反算应为 **0.6955 / 0.3045**。判据：4,681 / 15,372 = 0.3045 恰好复算出
+# 文档记录的实付金额 ¥0.0588（而 0.27 会算出 ¥0.0559）——所以 0.27 是错的。
+# 影响：输出单价是输入的 4 倍，比例偏差会使费用估算**偏低约 1.8%**；
+# 方向上是"低报"，对预算判断不利，必须按实测改正。
 MEASURED_TOKENS_PER_CALL = 480
 MEASURED_TOKENS_PER_CALL_MIN = 431
 MEASURED_TOKENS_PER_CALL_MAX = 562
-INPUT_SHARE = 0.73
-OUTPUT_SHARE = 0.27
+INPUT_SHARE = 0.6955
+OUTPUT_SHARE = 0.3045
 
-# 景点评价（C-BAT-07）单次调用的 token 估算：以实测事实包（3,553 字符 ≈ 2,368 token）
-# 加 system 约束段（≈330 token）为输入，输出按 schema 上限估算。
-REPORT_INPUT_TOKENS = 2_700
+# 景点评价（C-BAT-07）单次调用的 token 估算。
+#
+# 输入：实测 57 份事实包的最大 JSON 为 3,553 字符，对应真实 prompt 总字符数约 4,900，
+#       中文约 0.65 token/字 ⇒ 最坏约 **3,200 token**。这里取 **3,400**（略高于最坏实测）
+#       而不是原先的 2,700——因为预算是硬约束，**宁可高报**。
+# 输出：按 Schema 上限估算（而非中位数），同样取保守值。
+REPORT_INPUT_TOKENS = 3_400
 REPORT_OUTPUT_TOKENS = 700
 
 

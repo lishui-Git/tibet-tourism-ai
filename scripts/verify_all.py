@@ -59,6 +59,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_cross_phase_numbers.py", "跨阶段数字自洽（阶段二 47,149 与阶段四 47,733 的差可完整解释）", False),
     ("test_resume_cursor.py", "断点续跑实证（游标=结果表；插 1 行 → 计划调用恰减 1）", False),
     ("test_cost_projection.py", "计划阶段预估一致性（preflight ↔ dry-run 数字对得上）", False),
+    ("test_cost_model.py", "成本模型核对（常量可追溯实测 + 不低报）", False),
     ("test_dry_run_contract.py", "dry-run 契约（只统计不写库、不登记任务）", False),
     ("verify_demo_route.py", "答辩演示动线核对（手册第四节的断言逐行兑现）", False),
     ("check_docs_facts.py", "文档事实核对（手册命令可解析 + 基线数字与库一致）", False),
