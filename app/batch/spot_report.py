@@ -29,7 +29,7 @@ from typing import Any, Sequence
 
 from app.batch.task_registry import TaskRecorder, finish_task, register_task
 from app.batch.write_recovery import write_with_retry
-from app.db import connection, query_all
+from app.db import connection, query_all, query_one
 from app.llm.client import CallStats, ChatClient, LlmError
 from app.llm.prompts import REPORT_PROMPT_VERSION, build_report_messages, extract_json_text
 from app.llm.validators import ValidationError, check_number_consistency, validate_report
@@ -180,14 +180,49 @@ def run_spot_report(
         existing = {int(r["spot_id"]): r["fact_package_version"] for r in rows}
 
     stats = ReportStats(targets=len(packages))
+
+    # 两个"份数"必须分清（否则与 preflight 的数字对不上，操作者会以为谁算错了）：
+    #   · eligible_spots      —— **业务口径**：评论量 ≥100 的景点数（BR-02/BR-03，设计里就是 57）
+    #   · packages_available  —— **当前就绪**：库里已有事实包的景点数（C-BAT-06 的产物）
+    # 只有后者能立刻生成评价；前者是"跑完 facts 之后"的目标数。
+    eligible_row = query_one("SELECT COUNT(*) AS n FROM spot WHERE has_full_evaluation = 1") or {}
+    eligible_spots = int(eligible_row.get("n", 0))
+
+    # 还需要生成的份数：`force=True` 时全部重生成；否则跳过"已是同版本"的。
+    # 注意不能用 `already_generated` 来推——那个数只统计"该景点已有任意版本评价"，
+    # 与"是否同版本、是否会被跳过"不是一回事（并列展示，避免误读）。
+    if force:
+        pending_calls = len(packages)
+    else:
+        pending_calls = sum(
+            1 for p in packages if existing.get(int(p["spot_id"])) != p["version"]
+        )
+
     summary: dict[str, Any] = {
         "mode": "dry-run" if dry_run else ("mock" if mock else "real"),
+        "eligible_spots": eligible_spots,
+        "packages_available": len(packages),
         "fact_packages": len(packages),
         "already_generated": sum(1 for p in packages if int(p["spot_id"]) in existing),
+        "pending_api_calls": pending_calls,
         "force": force,
         "version_filter": version or "(全部)",
         "client": _client_summary(client),
     }
+    if not packages and eligible_spots:
+        summary["hint"] = (
+            f"当前没有任何事实包（spot_fact_package 为空），因此本次不会生成评价。"
+            f"请先执行 `--stage facts` 构造 {eligible_spots} 个景点的评价依据。"
+        )
+    # 计划阶段的费用预估（保险机制第 1、2 条：运行前就能看到调用量与费用）。
+    # 与 `preflight` 用同一个 `estimate_report_cost()`，保证两处数字口径一致。
+    if pending_calls:
+        from app.llm.preflight import estimate_report_cost
+
+        summary["estimated_cost_cny"] = {
+            "total": round(estimate_report_cost(pending_calls), 2),
+            "per_call_note": "按实测事实包大小 + Schema 输出上限推算；实际费用以运行结束打印的用量为准",
+        }
     if dry_run:
         return summary
 

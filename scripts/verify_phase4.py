@@ -578,32 +578,47 @@ def main(argv: list[str] | None = None) -> int:
     samples = pick_samples()
     print("测试样本：" + json.dumps({k: v[:6] for k, v in samples.items()}, ensure_ascii=False))
 
-    verify_semantic(samples)
-    packages = verify_fact_package()
-    verify_spot_report(packages)
-    if args.full_mock_check:
-        full_mock_check()
-
-    if not args.keep:
-        before_cleanup = table_state()
-        cleanup()
-        left = table_state()
-        expected = {k: len(v) for k, v in SNAPSHOT.items()}
-        check(
-            "清理后回到验证前状态（真实结果未被误删）",
-            left["sentiment"] == expected["sentiment"]
-            and left["semantic"] == expected["semantic"]
-            and left["fact_package"] == expected["fact_package"]
-            and left["spot_report"] == expected["spot_report"],
-            f"快照 {json.dumps(expected, ensure_ascii=False)} → 清理后 {json.dumps(left, ensure_ascii=False)}"
-            f"（清理前 {json.dumps(before_cleanup, ensure_ascii=False)}）",
-        )
-        print("\n已清理本次验证新写入的数据；库内原有结果保留：" + json.dumps(left, ensure_ascii=False))
-    else:
-        print("\n按 --keep 保留测试数据（记得手工清理，避免假数据混入真实结果）")
+    # 【必须 try/finally】验证步骤若中途抛异常（历史上真实发生过：一处
+    # `estimate_cost` 被同名导入遮蔽导致 TypeError），清理就永远不会执行，
+    # 于是 mock 行留在结果表里、污染"真实调用数"与费用核算，
+    # 而且任务行会停在 running。把清理放进 finally，保证"崩了也要收拾干净"。
+    crashed = False
+    try:
+        verify_semantic(samples)
+        packages = verify_fact_package()
+        verify_spot_report(packages)
+        if args.full_mock_check:
+            full_mock_check()
+    except Exception as exc:  # noqa: BLE001
+        crashed = True
+        print(f"\n[异常] 验证过程中断：{type(exc).__name__}: {exc}")
+        print("       仍会执行清理（避免 mock 数据残留在结果表里）")
+    finally:
+        if not args.keep:
+            before_cleanup = table_state()
+            cleanup()
+            left = table_state()
+            expected = {k: len(v) for k, v in SNAPSHOT.items()}
+            check(
+                "清理后回到验证前状态（真实结果未被误删）",
+                left["sentiment"] == expected["sentiment"]
+                and left["semantic"] == expected["semantic"]
+                and left["fact_package"] == expected["fact_package"]
+                and left["spot_report"] == expected["spot_report"],
+                f"快照 {json.dumps(expected, ensure_ascii=False)} → 清理后 {json.dumps(left, ensure_ascii=False)}"
+                f"（清理前 {json.dumps(before_cleanup, ensure_ascii=False)}）",
+            )
+            print("\n已清理本次验证新写入的数据；库内原有结果保留：" + json.dumps(left, ensure_ascii=False))
+        else:
+            print("\n按 --keep 保留测试数据（记得手工清理，避免假数据混入真实结果）")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
+    if crashed:
+        # 崩溃必须让脚本以非 0 退出：否则一键验证会把"跑了一半"当成通过。
+        check("验证过程未异常中断", False, "见上文 [异常] 行")
+        passed = sum(1 for _, ok, _ in RESULTS if ok)
+        total = len(RESULTS)
     print("\n" + "=" * 78)
     print(f"验证结果：{passed}/{total} 项通过")
     for name, ok, detail in RESULTS:

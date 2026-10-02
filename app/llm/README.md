@@ -171,7 +171,21 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 > `spot_report._estimate_cost()` 返回**完全相同的 9 个键**，
 > 并由测试断言"两个组件字段集合完全相同"——**形状漂移会被立刻发现**。
 
-#### 运行结束时控制台会单独打一行结论
+#### 运行前也能看到调用量与费用（保险机制第 1、2 条）
+
+三个地方都会在**运行前**给出预估，且数字**口径一致**（同一实测 token 区间 × 同一配置单价）：
+
+| 入口 | 给出的内容 |
+|---|---|
+| `--stage preflight` | 全局体检：待调用/待复用/待生成份数 + 费用区间 + `STATUS` |
+| `--stage semantic --dry-run` | `api_calls_planned`、`estimated_tokens_per_call`（实测均值与区间）、`estimated_cost_cny`（min/max） |
+| `--stage report --dry-run` | `eligible_spots`（业务口径：评论量 ≥100 的景点数）、`packages_available`（当前就绪事实包）、`pending_api_calls`（本次真正会调用的份数）、必要时给出 `hint` 提示先跑 facts |
+
+> **为什么要分 `eligible_spots` 与 `packages_available`**：这两个数天然不同——
+> 前者是"设计上应该生成评价的景点数"（57），后者是"当前库里已有事实包、因而**马上**能生成的份数"。
+> 如果只报一个数，就会出现"dry-run 说 0 份、preflight 说 57 份"的矛盾观感，
+> 让人怀疑哪个算错了。现在两者并列显示，且 `pending_api_calls` 只认后者（没有依据就不生成）。
+> `scripts/test_cost_projection.py`（11 项）断言 dry-run 与 preflight 的数字**逐项相等**。
 
 除了 JSON 明细，命令行在两个生成阶段结束后会额外打印一行**给人看**的结论
 （`app/llm/__main__.py` 的 `_print_cost_line()`）：

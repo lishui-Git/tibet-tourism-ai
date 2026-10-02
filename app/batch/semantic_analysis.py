@@ -699,6 +699,32 @@ def run_semantic_analysis(
         "concurrency": concurrency,
         "client": _client_summary(client),
     }
+    # 计划阶段的费用预估（保险机制第 1、2 条：**运行前**就要能看到调用量与费用区间）。
+    # 用与 `preflight` 完全相同的实测口径（单条 token 区间 × 配置单价），
+    # 这样"预检"与"dry-run"两处给出的数字不会互相打架。
+    if stats.api_calls_planned:
+        # 【必须起别名】本模块**自己**也有一个 `estimate_cost(call_stats)`。
+        # 若直接 `from ... import estimate_cost`，它会在本函数作用域内**遮蔽**模块级同名函数，
+        # 于是同一函数后面（非 dry-run 路径）的 `estimate_cost(call_stats)` 会命中
+        # 这个"需要两个参数"的版本并抛 TypeError。
+        # 该缺陷已在全量验证中暴露：它让 `verify_phase4` 在写入若干行后崩溃、**跳过清理**，
+        # 从而把 mock 行留在结果表里（并被 preflight 的 mock 检查抓出来）。
+        from app.llm.preflight import (
+            MEASURED_TOKENS_PER_CALL,
+            MEASURED_TOKENS_PER_CALL_MAX,
+            MEASURED_TOKENS_PER_CALL_MIN,
+            estimate_cost as estimate_cost_by_calls,
+        )
+
+        summary["estimated_tokens_per_call"] = {
+            "measured_avg": MEASURED_TOKENS_PER_CALL,
+            "range": [MEASURED_TOKENS_PER_CALL_MIN, MEASURED_TOKENS_PER_CALL_MAX],
+        }
+        summary["estimated_cost_cny"] = {
+            "min": round(estimate_cost_by_calls(stats.api_calls_planned, MEASURED_TOKENS_PER_CALL_MIN), 2),
+            "max": round(estimate_cost_by_calls(stats.api_calls_planned, MEASURED_TOKENS_PER_CALL_MAX), 2),
+            "note": "按 32 次实测的单条 token 区间与配置单价推算；实际费用以运行结束打印的用量为准",
+        }
     if dry_run:
         return summary
 
