@@ -112,6 +112,7 @@ python -m app.llm --stage semantic|facts|report|all|check
 | 返回非法 JSON / 校验不过 | 走一次修复轮；仍失败记失败 |
 | 单条失败 | 写 `task_log`（`level=ERROR`、`stage=semantic`、`ref_key=comment_id`、`resolved=0`），**批次继续** |
 | 重新跑失败项 | `--only-ids comment_id,...` 定向补跑 |
+| **写库失败（模型已成功）** | **只重试写库（≤3 次，带退避），绝不重新调用模型**；仍失败则把已付费结果落盘到 `logs/recovery/*.jsonl` 待补写。见 §7.1 |
 
 `--only-ids` 的补跑方式（示例）：
 
@@ -119,8 +120,29 @@ python -m app.llm --stage semantic|facts|report|all|check
 # 1) 查未解决的失败项
 mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='semantic' AND resolved=0 LIMIT 20"
 # 2) 定向补跑
-.\.venv\Scripts\python.exe -m app.llm --stage semantic --only-ids 73603914,73611141
+.\.venv\Scripts\python.exe -m app.llm --stage semantic --only-ids 73611141,74138768
 ```
+
+### 7.1 写库失败的兜底（"不因为写不进去而重复扣费"）
+
+调用层的顺序是"**先调用模型（钱已经花了）→ 再写库**"。
+如果写库抛错，`app/db.py` 的 `connection()` 会**整批回滚**，
+那么这一批已付费的结果就会丢掉；而下次运行时游标发现这些评论"还没有结果"，
+就会**再调用一次模型**——同一批数据被重复扣费。
+
+因此调用层统一走 `write_records_safely()`：
+
+| 步骤 | 行为 |
+|---|---|
+| ① 首次写库失败 | 打印失败原因，进入重试 |
+| ② 重试（≤3 次，退避 2s/3s） | **只重写数据库，绝不重新调用模型**；`write_records` 整批在同一事务内，失败会整批回滚，因此重试**不会产生重复行或残留脏数据** |
+| ③ 重试仍失败 | 把已付费结果写入 `logs/recovery/semantic_<n>.jsonl`（按 `comment_id % 100` 分片），控制台明确提示"已落盘待补" |
+| ④ 补写 | 数据未入库的评论**仍然是待处理**，下次正式运行时会被游标重新选中并按正常流程写库；落盘文件只作为"结果没丢"的凭证与人工补写依据 |
+
+> 该行为已由 `scripts/test_write_recovery.py` 固定：用注入的写库失败分别验证
+> "瞬时失败→重试成功"与"持续失败→落盘待补"，并断言**落盘内容可还原、可真正补写回库**，
+> 以及"测试本身没有改动任何业务数据"（测试前后结果表行数逐项一致）。
+> 该测试**不调用任何模型**。
 
 ## 8. 成本控制与**实测**成本（设计 §7.4 / NR-P-07）
 

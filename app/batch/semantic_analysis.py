@@ -26,13 +26,16 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Sequence
 
 from app.batch.task_registry import TaskRecorder, chunked, finish_task, register_task
-from app.db import connection, query_all, query_one
+from app.config import PROJECT_ROOT
+from app.db import DatabaseError, connection, query_all, query_one
 from app.llm.client import CallStats, ChatClient, LlmError
 from app.llm.prompts import (
     SEMANTIC_PROMPT_VERSION,
@@ -435,6 +438,138 @@ def write_records(conn, records: Sequence[dict[str, Any]], stats: SemanticStats)
 
 
 # ---------------------------------------------------------------------------
+# 五之二、写库失败的兜底：绝不因为"写不进去"而重新调用模型
+# ---------------------------------------------------------------------------
+
+# 已付费但未能写库的结果会落到这里，供下次零成本补写
+RECOVERY_DIR = PROJECT_ROOT / "logs" / "recovery"
+
+WRITE_RETRY_ATTEMPTS = 3
+WRITE_RETRY_SLEEP = 1.0
+
+
+def _recovery_path(comment_id: int) -> Path:
+    """按 `comment_id % 100` 分片（与 `WRITE_BATCH` 同数量级），避免单文件过大。"""
+    return RECOVERY_DIR / f"semantic_{int(comment_id) % 100:02d}.jsonl"
+
+
+def _records_to_payloads(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把待写记录序列化为可落盘的原始数据（**不含连接等不可序列化对象**）。
+
+    `SemanticResult` 是 dataclass，这里显式取出业务字段，
+    保证写出来的 JSONL 将来能被 `payload_to_record` 原样还原。
+    """
+    payloads: list[dict[str, Any]] = []
+    for rec in records:
+        result = rec["result"]
+        payloads.append(
+            {
+                "comment_id": int(rec["comment_id"]),
+                "spot_id": int(rec["spot_id"]),
+                "source": rec.get("source"),
+                "raw": rec.get("raw"),
+                "result": {
+                    "polarity": result.polarity,
+                    "intensity": result.intensity,
+                    "is_valid": int(result.is_valid),
+                    "keywords": result.keywords,
+                    "summary": result.summary,
+                    "aspects": [dict(a) for a in result.aspects],
+                    "dropped_aspects": [dict(a) for a in result.dropped_aspects],
+                    "validation_reason": result.validation_reason,
+                },
+            }
+        )
+    return payloads
+
+
+def payload_to_record(payload: dict[str, Any]) -> dict[str, Any]:
+    """把落盘的 payload 还原成 `write_records` 能接受的记录（补写用）。"""
+    data = payload["result"]
+    result = SemanticResult(
+        polarity=data["polarity"],
+        intensity=data["intensity"],
+        is_valid=int(data["is_valid"]),
+        aspects=[dict(a) for a in data.get("aspects") or []],
+        keywords=data.get("keywords"),
+        summary=data.get("summary"),
+        dropped_aspects=[dict(a) for a in data.get("dropped_aspects") or []],
+        validation_reason=data.get("validation_reason") or [],
+    )
+    return {
+        "comment_id": int(payload["comment_id"]),
+        "spot_id": int(payload["spot_id"]),
+        "result": result,
+        "source": payload.get("source"),
+        "raw": payload.get("raw"),
+    }
+
+
+def _persist_recovery(records: Sequence[dict[str, Any]]) -> Path | None:
+    """把一批"已付费但写库失败"的结果追加到本地文件（尽力而为）。
+
+    :returns: 落盘文件路径；失败返回 None（调用方只提示，不改变主流程）。
+    """
+    if not records:
+        return None
+    try:
+        RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+        first_path = _recovery_path(int(records[0]["comment_id"]))
+        with first_path.open("a", encoding="utf-8") as handle:
+            for payload in _records_to_payloads(records):
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        return first_path
+    except OSError:
+        return None
+
+
+def _retry_write(conn, records: Sequence[dict[str, Any]], stats: "SemanticStats") -> bool:
+    """带退避地重试写库（**只重试数据库写入，绝不重新调用模型**）。
+
+    安全性：`write_records` 的整批操作在同一事务内，失败时 `connection()`
+    会整批回滚，因此重试不会产生重复行或残留脏数据。
+    """
+    for attempt in range(2, WRITE_RETRY_ATTEMPTS + 1):
+        time.sleep(WRITE_RETRY_SLEEP * attempt)
+        try:
+            write_records(conn, records, stats)
+            print(f"      [写库重试] 第 {attempt} 次尝试成功（未重复调用模型）")
+            return True
+        except DatabaseError as exc:
+            print(f"      [写库重试] 第 {attempt} 次仍失败：{exc}")
+    return False
+
+
+def write_records_safely(conn, records: Sequence[dict[str, Any]], stats: "SemanticStats") -> None:
+    """写一批结果；**写库失败时先重试、再不成就落盘待补，绝不重新调用模型**。
+
+    这是对"数据库写入失败时不要简单重复请求模型"（保险机制第 10 条）的落地：
+        ① 首次写失败 → 最多重试 `WRITE_RETRY_ATTEMPTS - 1` 次（只重写，不重调）；
+        ② 仍失败 → 把结果写入 `logs/recovery/*.jsonl`，下次可零成本补写；
+        ③ 全过程不改变"下次运行会重查游标"的语义——未写成功的行仍是待处理。
+    """
+    if not records:
+        return
+    try:
+        write_records(conn, records, stats)
+        return
+    except DatabaseError as exc:
+        print(f"      [写库失败] {exc}")
+
+    if _retry_write(conn, records, stats):
+        return
+
+    path = _persist_recovery(records)
+    if path:
+        print(
+            f"      [已落盘待补] {len(records)} 条已付费结果写入 {path.name}；"
+            f"下次运行会重新查询游标，且不会重复调用模型（补写方式见 app/llm/README.md §11）"
+        )
+    else:
+        print(f"      [警告] {len(records)} 条已付费结果既未写库也未落盘（磁盘不可写）")
+
+
+# ---------------------------------------------------------------------------
 # 六、主流程
 # ---------------------------------------------------------------------------
 
@@ -591,6 +726,8 @@ def run_semantic_analysis(
         )
 
         # ④ 调用层（并发）
+        # 写库统一走 write_records_safely：写失败时先重试、再不成就落盘待补，
+        # **绝不重新调用模型**（保险机制第 10 条；真实调用已付费，重调等于重复扣费）。
         pending = list(plan.call_rows)
         for index in range(0, len(pending), CALL_BATCH):
             batch_rows = pending[index : index + CALL_BATCH]
@@ -599,7 +736,7 @@ def run_semantic_analysis(
             stats.api_success += len(records)
             stats.api_failed += len(batch_failures)
             for batch in chunked(records, WRITE_BATCH):
-                write_records(conn, batch, stats)
+                write_records_safely(conn, batch, stats)
                 written += len(batch)
             recorder.progress(written)
             planned = len(plan.rule_rows) + stats.api_calls_planned + stats.dup_members
