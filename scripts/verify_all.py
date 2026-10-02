@@ -44,6 +44,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("smoke_api.py", "接口冒烟（页面、静态资源、接口与错误码）", False),
     ("test_auth.py", "认证与鉴权（口令哈希、注册登录、越权、停用失效）", False),
     ("test_qa.py", "M5 智能问答（分类、检索、三条不调用模型的分支、越权）", False),
+    ("test_failure_fallback.py", "设计 §7.5 失败兜底（失败登记可补跑、不进分母、解读失败仍给数据）", False),
     ("test_report_regen.py", "接口 19 重新生成评价（在线只登记 / 离线 MockClient 强制重生成）", False),
     ("test_report_usage.py", "景点评价实际 usage 与费用（含修复轮累加；假客户端）", False),
     ("test_write_recovery.py", "写库失败兜底（注入写库失败 → 只重试写库、落盘待补，不重新调用模型）", False),
