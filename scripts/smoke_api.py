@@ -78,11 +78,16 @@ CASES = [
     ("/api/admin/tasks/4/logs", 401, 2001),
     ("/api/admin/users", 401, 2001),
     ("/api/admin/caliber", 401, 2001),
-    # --- 认证接口：POST-only 的接口用 GET 访问应得 405；需登录接口未登录得 2001 ---
+    # --- 认证接口：POST-only 的接口用 GET 访问应得 400/1001；需登录接口未登录得 2001 ---
+    #     （方法不匹配按 §6.4 归入"请求格式错误"=1001；此处会返回统一信封而非 Flask 默认 HTML）
     ("/api/auth/me", 401, 2001),
-    ("/api/auth/logout", 405, None),         # 注销是 POST
-    ("/api/auth/login", 405, None),          # 登录是 POST
-    ("/api/auth/register", 405, None),       # 注册是 POST
+    ("/api/auth/logout", 400, 1001),         # 注销是 POST
+    ("/api/auth/login", 400, 1001),          # 登录是 POST
+    ("/api/auth/register", 400, 1001),       # 注册是 POST
+    # --- 未注册的 API 路径也必须返回统一信封（而非 Flask 默认 HTML 404）---
+    ("/api/nope", 404, 3001),
+    ("/api/spots/abc", 404, 3001),           # 路径转换器拒绝 → 走 404 处理器
+    ("/api/spots/-1", 404, 3001),
     # --- M4 景点对比（指标由后端算；解读默认关闭，零 API 消费） ---
     ("/api/compare?spot_a=564&spot_b=196", 200, 0),
     ("/api/compare?spot_a=564&spot_b=564", 400, 1002),      # 同一景点
@@ -92,9 +97,9 @@ CASES = [
     ("/api/compare?spot_a=564&spot_b=322", 200, 0),         # 样本悬殊 → 可靠性提示
     # --- M5 智能问答（默认 APP_QA_LIVE=0：只分类+检索，不调用模型） ---
     ("/api/qa/history", 401, 2001),                          # 需登录
-    ("/api/qa/ask", 405, None),                              # 提问是 POST
+    ("/api/qa/ask", 400, 1001),                              # 提问是 POST
     # --- 接口 19 重新生成评价：需管理员；GET 不被允许 ---
-    ("/api/spots/564/report/regenerate", 405, None),         # 重生成是 POST
+    ("/api/spots/564/report/regenerate", 400, 1001),         # 重生成是 POST
 ]
 
 passed = failed = 0

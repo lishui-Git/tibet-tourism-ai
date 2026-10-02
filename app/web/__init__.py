@@ -4,30 +4,30 @@
 本包承载 C4 组件 `C-API-01` ~ `C-API-14`，采用应用工厂模式（create_app），
 便于后续按模块拆分路由蓝图、也便于自检脚本在不启动服务器的情况下获取 app 对象。
 
-当前进度（截至阶段四 + 只读业务层）：
-    页面：GET /                → 骨架首页（证明模板与静态资源可加载）
-    自检：GET /healthz         → 进程存活（不查库）
-          GET /api/db-ping     → MySQL 连通性 + 已建表数量（查库）
+当前进度（截至阶段四）：详细设计 §6.2 的 **26 个接口全部实现**，
+外加 3 个自检接口与 8 个页面路由；清单与说明见 `app/web/README.md`。
 
-    业务（**只读**，数据来自已落库的离线分析结果）：
-      M1 数据总览  GET /api/overview/summary | /trend | /distribution | /provinces | /data-note
-      M2 景点分析  GET /api/spots | /spots/ranking | /spots/{id} | /trend | /sentiment
-                       | /aspects | /topics | /reviews
-      M3 智能评价  GET /api/spots/{id}/report
-      M6 系统管理  GET /api/admin/tasks | /tasks/{id}/logs | /caliber
+    页面：`/`、`/overview`、`/spots`、`/evaluation`、`/compare`、`/qa`、`/tasks`、`/login`
+    自检：`GET /healthz`（不查库）、`GET /api/db-ping`（查库）
+    业务（**只读 + 离线结果**）：M1 总览 / M2 景点 / M3 评价 / M4 对比 / M5 问答 / M6 管理
 
-【架构原则】详细设计 §6.2 的其余接口（认证 4 个、对比 1 个、问答 2 个、
-重新生成评价 1 个、用户列表 1 个）尚未实现，因为它们依赖用户体系或需要在线模型调用；
-在实现前不注册路由，避免出现"有接口无实现"或"有权限校验但形同虚设"的情况。
+【架构原则】Web 层**只读数据库**：`app/web/**` 内不导入 `app.llm`、不发 HTTP 请求，
+因此"打开页面"永远不会产生模型调用；需要模型的场景（对比解读、问答回答）
+由 `APP_COMPARE_LIVE` / `APP_QA_LIVE` 显式开关控制，**默认关闭**。
 """
 
 from __future__ import annotations
 
 import secrets
 
-from flask import Flask
+from flask import Flask, request
 
 from app.config import settings
+
+
+def _wants_json_envelope() -> bool:
+    """请求是否属于 `/api/**`（决定错误响应用 JSON 信封还是 HTML 页面）。"""
+    return request.path.startswith("/api/")
 
 
 def create_app() -> Flask:
@@ -78,7 +78,45 @@ def create_app() -> Flask:
     app.register_blueprint(qa_bp)
     app.register_blueprint(admin_bp)
 
+    _register_error_handlers(app)
     return app
+
+
+def _register_error_handlers(app: Flask) -> None:
+    """让 `/api/**` 的 404/405 也返回统一信封，而不是 Flask 默认的 HTML 页面。
+
+    为什么必须做（本轮实测发现的缺口）：
+        `/api/spots/abc` 这类路径会被路由转换器 `<int:spot_id>` **在进入视图前**就拒绝，
+        因此项目自己的 `respond()` 根本没机会执行，客户端拿到的是
+        `text/html` 的 "404 Not Found" 页面——**不符合 §6.3 声明的统一响应体**，
+        前端按 `body.code` 取错误码时会拿到 `undefined`。
+
+    口径（严格按 §6.4 既有码，不新增）：
+        · 路径不存在          → 3001（资源不存在，HTTP 404）
+        · 路径存在但方法不对  → 1001（参数/请求格式错误，HTTP 400）
+
+    页面路由（非 `/api/`）**不受影响**，仍返回 Flask 默认的 HTML 404。
+    """
+    from app.web.response import (
+        CODE_NOT_FOUND,
+        CODE_PARAM_INVALID,
+        fail,
+    )
+
+    @app.errorhandler(404)
+    def _api_404(error):  # noqa: ANN001, ARG001
+        if not _wants_json_envelope():
+            return error
+        return fail(CODE_NOT_FOUND, "请求的接口路径不存在")
+
+    @app.errorhandler(405)
+    def _api_405(error):  # noqa: ANN001, ARG001
+        if not _wants_json_envelope():
+            return error
+        return fail(
+            CODE_PARAM_INVALID,
+            f"请求方法不被允许：{request.method} {request.path}",
+        )
 
 
 __all__ = ["create_app"]

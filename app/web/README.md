@@ -178,8 +178,26 @@
 # 口令交互式输入（不回显）；或 $env:APP_ADMIN_PASSWORD="……" 走非交互
 ```
 
-## 6. 口径纪律（BR-10）
+## 5b. 响应信封的覆盖范围（`/api/**` 一律 JSON）
 
+设计 §6.3 约定响应体固定为 `{code, message, data}`。但有一个**容易被忽略的漏洞**：
+若请求路径连路由都匹配不上（例如 `/api/spots/abc` 被 `<int:spot_id>` 转换器拒绝），
+Flask 会在**进入视图之前**就返回它自己的 HTML 404 页面——项目自己的 `respond()` 根本没机会执行，
+客户端按 `body.code` 取错误码会拿到 `undefined`。
+
+因此在应用工厂里注册了**只作用于 `/api/**`** 的错误处理器（`app/web/__init__.py`）：
+
+| 情况 | 返回 | 依据 |
+|---|---|---|
+| `/api/**` 路径不存在（含转换器拒绝的路径） | `3001` 资源不存在 / HTTP 404 | §6.4 |
+| `/api/**` 路径存在但方法不对（如 GET 一个 POST 接口） | `1001` 参数/请求格式错误 / HTTP 400 | §6.4（方法不匹配归入"请求格式错误"，**未新增码**） |
+| 页面路径（非 `/api/`）不存在 | Flask 默认 HTML 404 | 浏览器访问，保持 HTML 更合适 |
+
+> 实测：`/api/spots/abc`、`/api/spots/-1`、`/api/nope` → JSON `code=3001`；
+> `GET /api/qa/ask`、`POST /api/overview/summary` → JSON `code=1001`；
+> `/nope`、`/spots/nope` → 仍是 HTML 404。已纳入 `scripts/smoke_api.py`。
+
+## 6. 口径纪律（BR-10）
 受口径影响的返回都带 `caliber_note` 与 `sample_size`，统一在 `data_access.py` 定义，避免各处自写一套：
 
 | 常量 | 内容 |
