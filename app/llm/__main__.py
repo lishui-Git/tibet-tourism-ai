@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, Sequence
 
@@ -75,11 +76,24 @@ def _guard_scale(args: argparse.Namespace) -> None:
 
 
 def _build_client(args: argparse.Namespace):
-    """按参数构造客户端；真实客户端在缺 Key 时会抛出明确错误。"""
+    """按参数构造客户端；真实客户端在缺 Key 时会抛出明确错误。
+
+    【保险机制】`--offline`（或环境变量 `APP_LLM_OFFLINE=1`）会**硬阻断**真实调用：
+    即使命令行写了 --yes、--limit 很大，也不可能产生任何 API 消费。
+    用途：开发/演示/调试阶段把"不烧钱"变成代码级保证，而不是靠记性。
+    """
     if args.mock:
         from app.llm.mock import MockClient
 
         return MockClient(fail_every=args.mock_fail_every)
+
+    if args.offline or os.environ.get("APP_LLM_OFFLINE", "").strip() in {"1", "true", "yes", "on"}:
+        raise SystemExit(
+            "[已阻断真实调用] 当前处于离线模式（--offline 或 APP_LLM_OFFLINE=1）。\n"
+            "  本模式不会发起任何 DeepSeek 请求，因此不会产生费用。\n"
+            "  如确需真实调用，请去掉 --offline 并确认已获得授权。"
+        )
+
     from app.llm.client import DeepSeekClient
 
     client = DeepSeekClient()
@@ -190,6 +204,23 @@ def _run_check() -> dict[str, Any]:
     return checks
 
 
+def _guard_offline(args: argparse.Namespace) -> None:
+    """离线模式下，除 preflight/check/dry-run/mock 外的真实调用阶段一律拒绝。
+
+    这道闸门与 `_build_client` 里的阻断是**双重保险**：
+    即使将来有人改了客户端构造逻辑，这里也会先拦住。
+    """
+    offline = args.offline or os.environ.get("APP_LLM_OFFLINE", "").strip() in {"1", "true", "yes", "on"}
+    if not offline:
+        return
+    if args.mock or args.dry_run or args.stage in {"check", "preflight"}:
+        return
+    raise SystemExit(
+        f"[已阻断] 离线模式下不允许执行 --stage {args.stage} 的真实调用。\n"
+        "  允许的组合：--stage preflight / --stage check / --dry-run / --mock。"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m app.llm",
@@ -198,9 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stage",
-        choices=["semantic", "facts", "report", "all", "check"],
+        choices=["semantic", "facts", "report", "all", "check", "preflight"],
         default="check",
-        help="要执行的阶段：semantic=C-BAT-05；facts=C-BAT-06；report=C-BAT-07；all=05→06→07；check=只做自检",
+        help="要执行的阶段：semantic=C-BAT-05；facts=C-BAT-06；report=C-BAT-07；all=05→06→07；"
+             "check=结果健康自检；preflight=全量运行前预检（只读、零调用、含费用估算）",
     )
     parser.add_argument("--limit", type=int, default=None, help="小样本条数（确定性取前 N 条/前 N 个景点）")
     parser.add_argument("--mock", action="store_true", help=f"使用假客户端（仅小样本联调，--limit ≤ {MOCK_MAX_LIMIT}）")
@@ -217,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"确认执行大规模批处理（--limit > {CONFIRM_THRESHOLD} 或全量必须显式确认）",
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="离线模式：硬阻断一切真实 API 调用（开发/演示/调试时保证零消费）",
+    )
     return parser
 
 
@@ -224,6 +261,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _guard_mock(args)
     _guard_scale(args)
+    _guard_offline(args)
+
+    if args.stage == "preflight":
+        # 全量运行前预检：只读数据库、零 API 调用（见 app/llm/preflight.py）
+        from app.llm.preflight import print_report
+
+        print_report()
+        return 0
 
     if args.stage == "check":
         _print("阶段四自检", _run_check())

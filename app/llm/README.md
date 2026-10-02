@@ -27,7 +27,8 @@
 | `mock.py` | 假客户端：小样本链路联调（零 API 消耗；可注入失败用于验证失败处理） |
 | `prompts.py` | Prompt 模板集中管理 + 版本号（`SEMANTIC_PROMPT_VERSION` / `REPORT_PROMPT_VERSION`） |
 | `validators.py` | 模型输出校验：枚举、钳制、evidence 原文子串、长度截断、数字一致性 |
-| `__main__.py` | 统一 CLI（`python -m app.llm --stage ...`）与阶段四自检 |
+| `preflight.py` | **全量运行前预检**（只读、零调用）：工作量、费用区间、完整性、核心表校验和、READY/BLOCKED |
+| `__main__.py` | 统一 CLI（`python -m app.llm --stage ...`）、规模闸门、离线闸门与结果自检 |
 | `../batch/semantic_analysis.py` | C-BAT-05 实现 |
 | `../batch/fact_package.py` | C-BAT-06 实现 |
 | `../batch/spot_report.py` | C-BAT-07 实现 |
@@ -154,16 +155,20 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 
 ### 8.3 全量成本推算（基于实测）
 
+计算口径：单条 **480 token**（实测均值，区间 431–562）、输入:输出 = **73% : 27%**、
+单价 输入 ¥2 / 输出 ¥8 每百万 token → **单条约 ¥0.00174**。
+
 | 项 | 推算 |
 |---|---|
-| 评论级（C-BAT-05） | 47,733 × 480 token ≈ **2,290 万 token** → 约 **¥57** |
-| 按单批最坏情况（562 token/条） | 约 **¥67** |
-| 景点级（C-BAT-06 无调用；C-BAT-07 57 次） | 约 2,000 in / 700 out → 约 **¥4–6** |
-| **阶段四全量合计** | **约 ¥60–73** |
+| 评论级（C-BAT-05）47,701 次 | 均值口径 **¥74.42**；最坏（562 token/条）**¥97.04** |
+| 景点级（C-BAT-06 零调用；C-BAT-07 57 次） | 输入 ≈2,700 + 输出 ≈700 token/次 → **¥0.63** |
+| **阶段四全量合计** | **约 ¥75–98** |
 
+> 该区间与 `--stage preflight` 的实时输出完全一致（同一个计算函数），不要与本文件的历史版本混淆。
+>
 > **数据来源与局限（如实说明）**：
-> · 最后 8 次的 token 用量已随结果写入 `sentiment.raw_json.usage`，可仅凭数据库复核；
->   更早的 24 次当时尚未落库 usage，只能引用进程统计，因此本表以日志合计为准。
+> · 32 次实测中，**最后 8 次**的 token 用量已随结果写入 `sentiment.raw_json.usage`，可仅凭数据库复核；
+>   更早的 24 次当时尚未落库 usage，只能引用进程统计（preflight 会把这 24 条作为**提示项**列出，不阻断）。
 > · 样本取 `comment_id` 最小的 32 条（`--limit` 的确定性口径），短评比例与全库不同，
 >   全量费用应以实际运行后的统计为准；本表用于判断"是否可负担"，不作为结题定稿数字。
 > · 真实费用最终以 DeepSeek 账单为准；单价可用 `.env` 的 `APP_DEEPSEEK_PRICE_INPUT/OUTPUT` 覆盖。
@@ -174,8 +179,12 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 ## 9. 小样本验证与全量执行条件
 
 ```powershell
-# ① 阶段四自检（只读）
+# ① 阶段四结果健康自检（只读）
 .\.venv\Scripts\python.exe -m app.llm --stage check
+
+# ①b 全量运行前预检（只读、零调用；给出工作量、费用区间与 READY/BLOCKED）
+#     这是"要不要开跑、要花多少钱"的唯一权威入口
+.\.venv\Scripts\python.exe -m app.llm --stage preflight
 
 # ② 只看工作集规模（不调用、不写库）
 .\.venv\Scripts\python.exe -m app.llm --stage semantic --dry-run
@@ -206,10 +215,23 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 > ```
 
 **全量执行的前置条件（四条全部满足才允许）**：
-1. `scripts/verify_phase4.py` **34/34** 通过（含全量 mock 压测）；
-2. 真实小样本已通过，且记录了真实 token/费用（见 §8.2）；
-3. 成本按实测复核并汇报（见 §8.3，约 ¥60–73）；
+1. `python -m app.llm --stage preflight` 输出 **STATUS: READY**（核心表校验和一致、无重复结果、无非法值）；
+2. `scripts/verify_phase4.py` **34/34** 通过（含全量 mock 压测）；
+3. 真实小样本已通过，且记录了真实 token/费用（见 §8.2）；
 4. 明确指定"全量"并带 `--yes`（默认不跑全量，避免误触发 4.7 万次调用）。
+
+### 9.1 离线模式（开发/演示期的零消费保证）
+
+```powershell
+# 任何真实调用都被硬阻断；只允许 preflight / check / --dry-run / --mock
+.\.venv\Scripts\python.exe -m app.llm --stage semantic --yes --offline
+#   → [已阻断] 离线模式下不允许执行 --stage semantic 的真实调用。
+
+$env:APP_LLM_OFFLINE = "1"   # 也可以用环境变量全局生效
+```
+
+`--offline` 是**代码级**保证（两道闸门：`_guard_offline` + `_build_client`），
+不依赖"记得别跑"这种自觉；适合在写接口、调前端、准备答辩演示时全程开启。
 
 > `--mock` 使用假客户端，结果会在 `analysis_task.task_name` 中标注 `[mock]`，
 > **论文与答辩中不得引用 mock 结果**。

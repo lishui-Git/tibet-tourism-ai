@@ -25,7 +25,8 @@ def healthz():
         {
             "app": "tibet-review-analysis",
             "version": __version__,
-            "stage": "阶段一：开发环境与代码骨架初始化",
+            # 阶段标识：与项目实际进度保持一致（阶段四 = DeepSeek 语义分析）
+            "stage": "阶段四：DeepSeek 语义分析（C-BAT-05~07）",
             "db_target": settings.db.summary,  # 不含口令
         }
     )
