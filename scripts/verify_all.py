@@ -58,6 +58,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_cli_guards.py", "运行安全闸门（规模确认 / mock 上限 / 离线阻断 / 客户端构造）", False),
     ("check_page_bindings.py", "页面绑定（JS 引用的元素 id 在模板/脚本里都存在）", False),
     ("test_readonly_api.py", "只读架构实证（访问全部只读接口后数据逐表未变）", False),
+    ("test_server_startup.py", "真实进程启动验证（python run.py；页面/接口/静态资源走真实 HTTP）", False),
     ("test_source_data_readonly.py", "BR-11 实证（冻结的原始数据文件只读：静态扫描 + 指纹比对）", False),
     ("check_api_contract.py", "接口字段契约（前端依赖的字段确实存在）", False),
     ("verify_phase4.py", "阶段四端到端验证（34 项检查，含快照对比与清理）", True),
