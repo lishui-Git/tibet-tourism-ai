@@ -33,6 +33,40 @@ CONFIRM_THRESHOLD = 50     # 超过该规模的真实/模拟批处理必须显�
 def _print(title: str, payload: dict[str, Any]) -> None:
     print(f"\n=== {title} ===")
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    _print_cost_line(payload)
+
+
+def _print_cost_line(payload: dict[str, Any]) -> None:
+    """把"本次实际用量与实际费用"单独打一行，便于操作者一眼看到（保险机制第 11 条）。
+
+    为什么在 JSON 之外再打一行：JSON 适合事后解析，但**人**在跑完 4.7 万次调用后
+    最需要的是一个能直接读的结论——花了多少 token、多少钱。
+    两个生成组件返回的费用字段已刻意保持同形（见 `app/llm/README.md` §7.2），
+    因此这里可以统一处理，不需要为组件写特例。
+    """
+    cost = payload.get("cost")
+    if not isinstance(cost, dict):
+        return
+    prompt = cost.get("prompt_tokens")
+    completion = cost.get("completion_tokens")
+    total = cost.get("total_tokens")
+    if prompt is None and completion is None and total is None:
+        return
+    if total is None:
+        total = int(prompt or 0) + int(completion or 0)
+    money = cost.get("cost_total_cny")
+    per_call = cost.get("avg_tokens_per_call")
+    parts = [
+        f"输入 {int(prompt or 0):,} + 输出 {int(completion or 0):,} = 合计 {int(total or 0):,} tokens",
+    ]
+    if per_call:
+        parts.append(f"单次均 {per_call} tokens")
+    if money is not None:
+        parts.append(f"实际费用 ¥{money}")
+    else:
+        parts.append("费用未计算（无单价配置）")
+    print(f"\n[本次实际用量与费用] {'；'.join(parts)}")
+    print("  （金额按实际输入/输出 token × 配置单价计算；最终以 DeepSeek 账单为准）")
 
 
 def _guard_mock(args: argparse.Namespace) -> None:

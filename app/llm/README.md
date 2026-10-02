@@ -171,6 +171,21 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 > `spot_report._estimate_cost()` 返回**完全相同的 9 个键**，
 > 并由测试断言"两个组件字段集合完全相同"——**形状漂移会被立刻发现**。
 
+#### 运行结束时控制台会单独打一行结论
+
+除了 JSON 明细，命令行在两个生成阶段结束后会额外打印一行**给人看**的结论
+（`app/llm/__main__.py` 的 `_print_cost_line()`）：
+
+```
+[本次实际用量与费用] 输入 10,691 + 输出 4,681 = 合计 15,372 tokens；单次均 480.4 tokens；实际费用 ¥0.0588
+  （金额按实际输入/输出 token × 配置单价计算；最终以 DeepSeek 账单为准）
+```
+
+- 数字直接来自 `CallStats`（**实际**用量），不是估算；
+- 事实包（`--stage facts`）零调用、没有 `cost` 字段，因此**不会打印这一行**——
+  避免让人误以为它花了钱；
+- 两种极限情况（真实有量、复用全 0）都有测试覆盖。
+
 > **同一套兜底也覆盖景点评价（C-BAT-07）**：`run_spot_report` 的写库失败同样会
 > "只重试写库 → 落盘待补 → 记 `task_log`(ERROR) 并继续下一个景点"，
 > 且**每个景点写成功即提交**。共享实现见 `app/batch/write_recovery.py`，

@@ -145,6 +145,36 @@ def main() -> int:
     check("都给出单次平均 token（便于与实测口径核对）",
           "avg_tokens_per_call" in report_shape, "")
 
+    # ---------- E. 运行结束时的"实际用量与费用"单行输出 ----------
+    print("\n[E] 命令行会单独打一行『本次实际用量与费用』（便于人直接读）")
+    import io
+    from contextlib import redirect_stdout
+
+    from app.llm.__main__ import _print_cost_line
+
+    # 用 §8.2 记录的 32 次实测汇总作为样例，验证输出保真
+    measured = {
+        "prompt_tokens": 10691, "completion_tokens": 4681, "total_tokens": 15372,
+        "cost_input_cny": 0.0214, "cost_output_cny": 0.0374,
+        "cost_total_cny": 0.0588, "avg_tokens_per_call": 480.4,
+    }
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        _print_cost_line({"cost": measured})
+    line = buf.getvalue()
+    check("输出了『本次实际用量与费用』标题", "本次实际用量与费用" in line, "")
+    check("数字与实测汇总一致（15,372 tokens / ¥0.0588 / 480.4）",
+          "15,372" in line and "0.0588" in line and "480.4" in line,
+          line.strip().splitlines()[0] if line.strip() else "")
+    check("明确写出金额口径与最终账单的关系",
+          "单价" in line and "账单" in line, "")
+
+    buf2 = io.StringIO()
+    with redirect_stdout(buf2):
+        _print_cost_line({"generated": 57})   # 事实包：零调用，没有 cost 字段
+    check("零调用阶段（无 cost 字段）不打印该行，避免误导",
+          buf2.getvalue().strip() == "", repr(buf2.getvalue()[:40]))
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
     print("\n" + "=" * 84)
