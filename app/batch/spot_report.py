@@ -58,6 +58,28 @@ REPORT_UPSERT_SQL = """
 """
 
 
+def report_upsert_params(payload: dict[str, Any], prompt_version: str, task_id: int | None = None) -> tuple:
+    """构造 `REPORT_UPSERT_SQL` 的参数元组。
+
+    抽出来是为了让**正常写入**与**恢复补写**（`app/batch/replay.py`）共用同一份参数顺序：
+    两处各写一遍的话，将来加字段只会改到一处，另一处会静默写错列。
+    `task_id` 允许为 None（补写时没有对应的运行任务）。
+    """
+    return (
+        payload["spot_id"],
+        payload["fact_package_version"],
+        payload["summary"],
+        json.dumps(payload.get("advantages") or [], ensure_ascii=False),
+        json.dumps(payload.get("issues") or [], ensure_ascii=False),
+        json.dumps(payload.get("visitor_focus") or [], ensure_ascii=False),
+        payload["model"],
+        prompt_version,
+        payload["need_review"],
+        payload["token_usage"],
+        task_id,
+    )
+
+
 @dataclass
 class ReportStats:
     targets: int = 0
@@ -282,19 +304,7 @@ def run_spot_report(
                 with conn.cursor() as cur:
                     cur.execute(
                         REPORT_UPSERT_SQL,
-                        (
-                            _payload["spot_id"],
-                            _payload["fact_package_version"],
-                            _payload["summary"],
-                            json.dumps(_payload["advantages"], ensure_ascii=False),
-                            json.dumps(_payload["issues"], ensure_ascii=False),
-                            json.dumps(_payload["visitor_focus"], ensure_ascii=False),
-                            _payload["model"],
-                            REPORT_PROMPT_VERSION,
-                            _payload["need_review"],
-                            _payload["token_usage"],
-                            task_id,
-                        ),
+                        report_upsert_params(_payload, REPORT_PROMPT_VERSION, task_id),
                     )
 
             outcome = write_with_retry(

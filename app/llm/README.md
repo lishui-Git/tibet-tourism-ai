@@ -215,6 +215,23 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 > 且**每个景点写成功即提交**。共享实现见 `app/batch/write_recovery.py`，
 > 两类组件使用**同一种 JSONL 结构**（`{"text":…, "payload":…}`），因此可以用
 > `load_recovery(prefix)` 统一读出后零成本补写。
+>
+> **补写入口（本轮补上的一环）**：`python -m app.llm --stage replay [--dry-run]`
+> ——把 `logs/recovery/*.jsonl` 里"**已付费但没写进库**"的结果写回数据库。
+> 为什么必须补：`load_recovery()` 与 `payload_to_record()` 早就写好了、docstring 也写着
+> "补写用"，但**没有任何生产入口调用它们**（只有测试在用）——
+> 也就是说恢复文件曾经是"**只写不读**"的，真出事后得手工处理。
+> 现在这条链路是通的：
+>
+> | 行为 | 说明 |
+> |---|---|
+> | **零模型调用** | 只做 `payload → 数据库`；`app/batch/replay.py` 不持有客户端、不导入 HTTP |
+> | `--dry-run` | 只报告"几个文件、多少条待补"，**不写库、不删文件** |
+> | 补写成功才删凭证 | 以"数据库里到底有没有"为准重写恢复文件；全部成功才删除 |
+> | 失败仍保留 | 补写自身若再失败，仍走原重试/落盘机制，绝不丢已付费结果 |
+>
+> 由 `scripts/test_replay.py`（16 项）固定：造文件 → dry-run 不写库 →
+> 实际补写入表 → 文件删除 → **行数回到基线**。
 
 > **事务粒度的修正（实测缺口）**：`connection()` 原本**只在正常退出时提交一次**，
 > 意味着 4.7 万次调用的中途任何异常都会把当轮已付费结果**全部回滚**——

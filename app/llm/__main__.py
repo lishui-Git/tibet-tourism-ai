@@ -257,7 +257,7 @@ def _guard_offline(args: argparse.Namespace) -> None:
     offline = args.offline or os.environ.get("APP_LLM_OFFLINE", "").strip() in {"1", "true", "yes", "on"}
     if not offline:
         return
-    if args.mock or args.dry_run or args.stage in {"check", "preflight"}:
+    if args.mock or args.dry_run or args.stage in {"check", "preflight", "replay"}:
         return
     # 提示要能直接照着做：很多人会在真实跑之前顺手加 --offline"以防万一"，
     # 结果被这道闸门拦住却不知道下一步该怎么做（实测踩到过），因此把替代做法写清楚。
@@ -284,10 +284,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stage",
-        choices=["semantic", "facts", "report", "all", "check", "preflight"],
+        choices=["semantic", "facts", "report", "all", "check", "preflight", "replay"],
         default="check",
         help="要执行的阶段：semantic=C-BAT-05；facts=C-BAT-06；report=C-BAT-07；all=05→06→07；"
-             "check=结果健康自检；preflight=全量运行前预检（只读、零调用、含费用估算）",
+             "check=结果健康自检；preflight=全量运行前预检（只读、零调用、含费用估算）；"
+             "replay=补写已付费但没写进库的落盘结果（零模型调用）",
     )
     parser.add_argument("--limit", type=int, default=None, help="小样本条数（确定性取前 N 条/前 N 个景点）")
     parser.add_argument("--mock", action="store_true", help=f"使用假客户端（仅小样本联调，--limit ≤ {MOCK_MAX_LIMIT}）")
@@ -372,6 +373,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.stage == "check":
         _print("阶段四自检", _run_check())
+        return 0
+
+    if args.stage == "replay":
+        # 零成本补写：把"已付费但没写进库"的落盘结果写回数据库（绝不调用模型）
+        from app.batch.replay import replay_all
+
+        _print("恢复补写（零模型调用）", replay_all(dry_run=args.dry_run))
         return 0
 
     if args.dry_run:
