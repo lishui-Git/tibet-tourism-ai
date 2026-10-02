@@ -20,7 +20,7 @@ from __future__ import annotations
 from flask import Blueprint, request
 
 from app.web.auth import list_users
-from app.web.data_access import parse_int_arg, parse_pagination
+from app.web.data_access import ParamError, parse_int_arg, parse_pagination
 from app.web.routes._auth_helpers import admin_required
 from app.web.routes._helpers import respond, respond_one
 from app.web.services import admin_caliber, admin_task_detail, admin_tasks
@@ -36,7 +36,12 @@ def tasks():
 
     def action():
         limit = parse_int_arg(request.args, "limit", required=False, default=20)
-        return admin_tasks(limit or 20, task_type)
+        # `limit=0`（或负数）显式拒绝，而不是"当作没传、回落到默认 20"。
+        # 为什么：调用方写了 limit=0 却拿回 20 条，会以为参数没生效（实测发现该不一致：
+        # limit=-1 与 limit=99999 都会被 1002 拒绝，只有 0 被静默吞掉）。
+        if limit is None or limit < 1:
+            raise ParamError("参数 limit 必须 ≥ 1", code=1002)
+        return admin_tasks(limit, task_type)
 
     return respond(action)
 

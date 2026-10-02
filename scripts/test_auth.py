@@ -142,6 +142,22 @@ def main() -> int:
     resp = admin_client.get("/api/admin/caliber")
     check("管理员访问口径配置 → 200 code=0", resp.status_code == 200 and resp.get_json()["code"] == 0, f"HTTP {resp.status_code}")
 
+    # limit 边界一致性：0 与负数必须同样被拒绝，而不是被静默吞掉回落到默认值。
+    # （实测发现的缺口：limit=-1 与 limit=99999 会被 1002 拒绝，只有 0 被当作"没传"。）
+    resp = admin_client.get("/api/admin/tasks?limit=0")
+    check("limit=0 → 400/1002（不静默回落到默认 20）",
+          resp.status_code == 400 and resp.get_json()["code"] == 1002,
+          f"HTTP {resp.status_code} code={resp.get_json().get('code')}")
+    resp = admin_client.get("/api/admin/tasks?limit=-1")
+    check("limit=-1 → 400/1002",
+          resp.status_code == 400 and resp.get_json()["code"] == 1002,
+          f"HTTP {resp.status_code} code={resp.get_json().get('code')}")
+    resp = admin_client.get("/api/admin/tasks?limit=1")
+    body1 = resp.get_json()
+    check("limit=1 → 只返回 1 条（参数确实生效）",
+          resp.status_code == 200 and len((body1.get("data") or {}).get("items") or []) <= 1,
+          f"items={len((body1.get('data') or {}).get('items') or [])}")
+
     # ---------- 5. 注销 ----------
     print("\n[5] 注销（接口 3）")
     resp = client.post("/api/auth/logout")
