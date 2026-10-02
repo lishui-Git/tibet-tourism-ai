@@ -239,6 +239,89 @@ def _run_check() -> dict[str, Any]:
     return checks
 
 
+STALE_RUNNING_HOURS = 6   # 超过该时长仍为 running 的任务视为"上次崩溃遗留"，不再阻断
+
+
+def _guard_concurrent_run(args: argparse.Namespace) -> None:
+    """拒绝在"同类型任务仍在运行"时再开一个实例（防重复扣费）。
+
+    ## 为什么必须有这道闸门（本轮实测发现的缺口）
+    "已成功的不重复调用"是靠**计划阶段**的 `WHERE NOT EXISTS(...)` 实现的：
+    跑之前先查"哪些还没有结果"。但**写入发生在后面**。于是只要有**两个实例**同时开跑：
+        实例 A 计划 → 查到 0 条已完成 → 开始调用（付费）
+        实例 B 计划 → **同样**查到 0 条已完成 → 也开始调用（**重复付费**）
+    代价是**双倍费用**（约 ¥75 变 ¥150），而 `ON DUPLICATE KEY UPDATE` 只能保证
+    **写库不重复**，**拦不住重复的 API 调用**——手册里"并发不重复请求"这句话
+    说的其实是后者，口径需要澄清（已同步修正文档）。
+
+    ## 判据
+    `analysis_task` 里同 `task_type` 存在 `status='running'` 且**启动时间较新**的任务。
+    超过 `STALE_RUNNING_HOURS` 的视为上次异常退出的遗留，不阻断（否则一次崩溃会永久锁死），
+    但会在提示里说明。
+
+    ## 绕行
+    `--allow-concurrent`：确认另一个实例已经停了（或确需并行）时显式放行。
+    """
+    from app.db import query_all
+
+    # 只有会真实调用的阶段需要拦；纯只读/补写阶段不涉及重复扣费
+    if args.stage not in {"semantic", "facts", "report", "all"}:
+        return
+    if args.dry_run:
+        return
+
+    task_types = {
+        "semantic": ["semantic"],
+        "facts": ["fact_package"],
+        "report": ["spot_report"],
+        "all": ["semantic", "fact_package", "spot_report"],
+    }[args.stage]
+
+    try:
+        placeholders = ",".join(["%s"] * len(task_types))
+        rows = query_all(
+            f"""
+            SELECT task_id, task_type, task_name, started_at,
+                   TIMESTAMPDIFF(MINUTE, started_at, NOW()) AS minutes_running
+              FROM analysis_task
+             WHERE status = 'running' AND task_type IN ({placeholders})
+             ORDER BY started_at DESC
+            """,
+            tuple(task_types),
+        )
+    except Exception:
+        # 查不动库就不因为这个闸门挡住运行（真正的写库问题会在别处暴露）
+        return
+
+    fresh = [r for r in rows if (r.get("minutes_running") or 0) <= STALE_RUNNING_HOURS * 60]
+    if not fresh:
+        return
+
+    lines = [
+        f"  · task_id={r['task_id']} type={r['task_type']} 已运行 {r['minutes_running']} 分钟"
+        f"（{r.get('task_name') or ''}）"
+        for r in fresh
+    ]
+    if args.allow_concurrent:
+        print(
+            "\n[警告] 检测到同类型任务仍在运行，但已指定 --allow-concurrent，继续执行。\n"
+            "       若那是另一个正在付费运行的实例，两边会**重复调用同一批数据**（费用翻倍）。"
+        )
+        for line in lines:
+            print(line)
+        return
+    raise SystemExit(
+        "[拒绝执行] 检测到同类型的批处理任务仍在运行，为避免**重复调用 DeepSeek 重复扣费**，已中止：\n"
+        + "\n".join(lines)
+        + "\n\n处理办法：\n"
+        "  ① 先确认那个实例是否还在跑——若在跑，等它结束即可；\n"
+        "  ② 若那个实例已经异常退出（进程没了但状态还是 running），\n"
+        "     可在管理端把该任务标记为失败，或用 `--force` 之外的方式忽略它；\n"
+        "  ③ 若你确认要并行执行，请显式加 `--allow-concurrent`。\n"
+        "  注：`--only-ids` / `--spot-ids` 定向补跑同样会经过本闸门。"
+    )
+
+
 def _guard_offline(args: argparse.Namespace) -> None:
     """离线模式下，除 preflight/check/dry-run/mock 外的真实调用阶段一律拒绝。
 
@@ -299,6 +382,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--only-ids", type=str, default=None, help="C-BAT-05：只处理指定 comment_id，逗号分隔（失败补跑用）")
     parser.add_argument("--version", type=str, default=None, help="事实包版本（C-BAT-06/07，默认 v1）")
     parser.add_argument("--force", action="store_true", help="C-BAT-07：即使已有同版本评价也重新生成")
+    parser.add_argument(
+        "--allow-concurrent",
+        action="store_true",
+        help="确认没有另一个实例在运行时，允许在本类型任务仍标记为 running 的情况下执行"
+        "（默认拒绝，防止两个实例重复调用 DeepSeek 重复扣费）",
+    )
     parser.add_argument("--only-missing", action="store_true", help="C-BAT-06：只补缺失的事实包")
     parser.add_argument(
         "--yes",
@@ -363,6 +452,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _guard_mock(args)
     _guard_scale(args)
     _guard_offline(args)
+    _guard_concurrent_run(args)
 
     if args.stage == "preflight":
         # 全量运行前预检：只读数据库、零 API 调用（见 app/llm/preflight.py）

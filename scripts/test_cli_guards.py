@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """运行安全闸门测试（preflight / --mock / --offline / 规模确认）。
 
 ## 为什么单独测"闸门"
@@ -157,6 +157,77 @@ def main() -> int:
     out_rep = capture("--stage", "report", "--concurrency", "3")
     check("--stage report + --concurrency → 提示不起作用",
           "不起作用" in out_rep and "--concurrency" in out_rep, out_rep.strip()[:80])
+
+    # ---------- H. 并发运行闸门（防两个实例重复扣费） ----------
+    print("\n[H] 并发运行闸门：同类型任务仍在 running 时，真实运行必须被拒绝")
+    from datetime import datetime, timedelta
+
+    from app.db import connection, query_one
+    from app.llm.__main__ import STALE_RUNNING_HOURS, _guard_concurrent_run
+
+    def parse(*argv: str):
+        return parser.parse_args(list(argv))
+
+    def concurrent_blocks(*argv: str) -> bool:
+        try:
+            _guard_concurrent_run(parse(*argv))
+            return False
+        except SystemExit:
+            return True
+
+    created: list[int] = []
+
+    def make_running(task_type: str, minutes_ago: int) -> int:
+        started = (datetime.now() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M:%S")
+        with connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO analysis_task (task_type, task_name, status, started_at) "
+                    "VALUES (%s, '【闸门测试】临时任务', 'running', %s)",
+                    (task_type, started),
+                )
+                tid = int(cur.lastrowid)
+        created.append(tid)
+        return tid
+
+    try:
+        check("无 running 任务时放行（不误伤正常流程）",
+              not concurrent_blocks("--stage", "semantic", "--only-ids", "1"), "")
+
+        make_running("semantic", 1)
+        check("同类型任务刚启动 → 拒绝（这是防重复扣费的关键）",
+              concurrent_blocks("--stage", "semantic", "--only-ids", "1"), "")
+        check("--dry-run 不受影响（它不调用模型）",
+              not concurrent_blocks("--stage", "semantic", "--only-ids", "1", "--dry-run"), "")
+        check("不同类型任务不互相阻断（report 不受 semantic 影响）",
+              not concurrent_blocks("--stage", "report"), "")
+        check("--allow-concurrent 可显式放行",
+              not concurrent_blocks("--stage", "semantic", "--only-ids", "1", "--allow-concurrent"), "")
+        check("只读阶段（check / preflight）不受影响",
+              not concurrent_blocks("--stage", "check") and not concurrent_blocks("--stage", "preflight"), "")
+
+        # 陈旧 running（异常退出遗留）不应永久锁死
+        with connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE analysis_task SET started_at = %s WHERE task_id = %s",
+                    (
+                        (datetime.now() - timedelta(hours=STALE_RUNNING_HOURS + 1)).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                        created[0],
+                    ),
+                )
+        check(f"超过 {STALE_RUNNING_HOURS} 小时的 running 视为遗留，不再阻断（避免崩溃后锁死）",
+              not concurrent_blocks("--stage", "semantic", "--only-ids", "1"), "")
+    finally:
+        if created:
+            with connection() as conn:
+                with conn.cursor() as cur:
+                    ph = ",".join(["%s"] * len(created))
+                    cur.execute(f"DELETE FROM analysis_task WHERE task_id IN ({ph})", tuple(created))
+        left = int(query_one("SELECT COUNT(*) AS n FROM analysis_task WHERE status='running'")["n"])
+        check("清理后没有残留的 running 任务", left == 0, f"running={left}")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)

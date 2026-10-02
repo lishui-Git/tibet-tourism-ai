@@ -103,6 +103,29 @@ python -m app.llm --stage semantic|facts|report|all|check
 
 **断点粒度**：每 `WRITE_BATCH=200` 条提交一次，宕机最多重做 200 条。
 
+### 6.1 幂等的边界：它挡不住"两个实例同时跑"
+
+`WHERE NOT EXISTS(...)` 是**计划阶段**的判断，而写入在后面。所以：
+
+```
+实例 A 计划 → 查到 0 条已完成 → 开始调用（付费）
+实例 B 计划 → 同样查到 0 条已完成 → 也开始调用（重复付费）
+```
+
+`ON DUPLICATE KEY UPDATE` 只保证**写库不重复**，**拦不住重复的 API 调用**——
+代价是**双倍费用**（约 ¥75 → ¥150）。
+
+因此新增了**并发运行闸门**（`app/llm/__main__.py` 的 `_guard_concurrent_run`）：
+
+| 情形 | 行为 |
+|---|---|
+| 同 `task_type` 有 `status='running'` 且启动时间较新 | **拒绝执行**，并说明处理办法 |
+| 该任务已超过 `STALE_RUNNING_HOURS = 6` 小时 | 视为上次崩溃遗留，不阻断（避免一次崩溃永久锁死） |
+| `--dry-run` / 只读阶段（`check`/`preflight`/`replay`） | 不受影响 |
+| 确认无并行、或确需并行 | 显式 `--allow-concurrent` 放行（并打印警告） |
+
+由 `scripts/test_cli_guards.py` 的 `[H]` 组（8 项）固定，含"6 小时陈旧不阻断"与清理断言。
+
 ## 7. 失败处理
 
 | 情况 | 处理 |
