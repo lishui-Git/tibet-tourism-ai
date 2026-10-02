@@ -28,10 +28,14 @@ async function loadRanking() {
     ]);
     box.innerHTML = renderTable(
       ['景点', '排序指标', '评论量', '平均评分', '好评率', '差评率', '评价资格'], rows
-    ) + caliberNote(data.caliber_note, data.sample_size);
+    );
+    // 口径说明写在模板专门提供的 #rank-note 里（与总览页 ov-*-note 的写法一致）。
+    // 此前是拼在表格容器内，导致 #rank-note 永远为空、且结果为空时口径说明会一并消失。
+    document.getElementById('rank-note').innerHTML = caliberNote(data.caliber_note, data.sample_size);
     bindSpotLinks(box);
   } catch (e) {
     showError('rank-table', e);
+    document.getElementById('rank-note').innerHTML = '';
   }
 }
 

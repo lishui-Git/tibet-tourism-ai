@@ -50,6 +50,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_spot_report_write_failure.py", "景点评价写库失败兜底（注入写库失败 → 批次继续 + 落盘待补）", False),
     ("test_layering.py", "分层自洽性（三层互斥穷尽 + 待处理口径吻合，证明无评论被静默跳过）", False),
     ("test_cli_guards.py", "运行安全闸门（规模确认 / mock 上限 / 离线阻断 / 客户端构造）", False),
+    ("check_page_bindings.py", "页面绑定（JS 引用的元素 id 在模板/脚本里都存在）", False),
     ("check_api_contract.py", "接口字段契约（前端依赖的字段确实存在）", False),
     ("verify_phase4.py", "阶段四端到端验证（34 项检查，含快照对比与清理）", True),
 )

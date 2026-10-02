@@ -142,6 +142,18 @@
 2. **图表库本地内置**：ECharts 与 axios 已下载到 `static/vendor/`，
    答辩现场断网也能正常渲染（不依赖 CDN）。
 
+**页面的三类自动检查**（覆盖不同盲区，互为补充）：
+
+| 脚本 | 查什么 | 查不到的 |
+|---|---|---|
+| `smoke_api.py` | 路由与静态资源是否 200、错误码是否正确 | 页面里的控件是否真的能用 |
+| `check_api_contract.py` | 接口返回的字段是否都在（前端取空白的根源） | 模板与脚本的绑定是否正确 |
+| `check_page_bindings.py` | **JS 引用的元素 id 是否都存在**（含脚本动态生成的 id） | 事件是否触发（需真机浏览器） |
+| `test_auth.py` / `test_qa.py` | 会话与业务分支的行为 | 视觉与交互手感 |
+
+> 第三类是本轮补的：`getElementById('打错字的id')` 返回 null，JS 在该行抛错、
+> 后续逻辑全不执行——页面"能打开但某些功能没反应"，而前三类检查**都发现不了**。
+
 未实现的页面：无（六个模块的页面均已落地）。
 
 ## 5. 认证与鉴权（§13.1 / §13.2）
@@ -202,6 +214,10 @@
 
 # 接口字段契约校验：逐个断言"前端依赖的字段"确实存在（仅公开接口）
 .\.venv\Scripts\python.exe scripts\check_api_contract.py
+
+# 页面绑定检查：JS 引用的元素 id 是否都存在于对应模板/脚本（静态、零成本）
+#   —— 冒烟测试与契约测试都发现不了"JS 取了一个打错字的 id"这类静默失效
+.\.venv\Scripts\python.exe scripts\check_page_bindings.py
 
 # 手工抽查
 curl.exe "http://127.0.0.1:5000/api/overview/summary"
