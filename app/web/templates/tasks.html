@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}任务与口径 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}M6 系统管理：批处理任务状态与数据口径{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>一、数据口径配置</h2>
+  <p class="hint">受口径影响的接口都会在返回中原样回显这些说明（BR-10）。</p>
+  <div id="caliber-body"></div>
+</section>
+
+<section class="card">
+  <h2>二、批处理任务</h2>
+  <p class="hint">
+    类型：
+    <select id="task-type">
+      <option value="">全部</option>
+      <option value="clean">clean（导入/清洗）</option>
+      <option value="stat">stat（Spark 统计）</option>
+      <option value="mllib">mllib（情感基线）</option>
+      <option value="lda">lda（主题）</option>
+      <option value="semantic">semantic（评论语义）</option>
+      <option value="fact_package">fact_package（事实包）</option>
+      <option value="spot_report">spot_report（景点评价）</option>
+    </select>
+    <button id="btn-tasks" type="button">刷新</button>
+  </p>
+  <div id="task-summary"></div>
+  <div id="task-table"></div>
+
+  <h3>任务日志</h3>
+  <p class="hint">点击上方任务行的「日志」按钮查看明细（含每步计数与失败记录）。</p>
+  <div id="task-logs"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/tasks.js') }}"></script>
+{% endblock %}

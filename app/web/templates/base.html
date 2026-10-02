@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}西藏旅游景点智能评价与分析系统{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <h1>基于 DeepSeek 的西藏旅游景点智能评价与分析系统</h1>
+        <p class="subtitle">{% block subtitle %}离线智能分析结果查询平台{% endblock %}</p>
+      </div>
+      <nav class="mainnav">
+        <a href="/">首页</a>
+        <a href="/overview">数据总览</a>
+        <a href="/spots">景点分析</a>
+        <a href="/evaluation">智能评价</a>
+        <a href="/tasks">任务与口径</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>
+      本系统面向旅游评论数据集的<strong>离线</strong>智能分析：DeepSeek 负责离线语义结构化，
+      Web 层只读取已落库的分析结果——因此页面刷新不产生任何模型调用费用，结果可复现。
+    </p>
+  </footer>
+
+  <script src="{{ url_for('static', filename='vendor/echarts.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/axios.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

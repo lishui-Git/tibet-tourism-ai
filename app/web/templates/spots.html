@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}景点分析 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}M2 景点分析：排行榜、景点检索、情感／方面／主题／代表评论{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>一、景点排行</h2>
+  <p class="hint">
+    排序依据：
+    <select id="rank-by">
+      <option value="reviews">评论量</option>
+      <option value="rating">平均评分（仅评论量 ≥10 条）</option>
+      <option value="positive_rate">好评率（仅评论量 ≥10 条）</option>
+    </select>
+    　显示前
+    <select id="rank-limit">
+      <option value="10">10</option>
+      <option value="20" selected>20</option>
+      <option value="50">50</option>
+    </select>
+    个景点
+  </p>
+  <div id="rank-table"></div>
+  <div id="rank-note"></div>
+</section>
+
+<section class="card">
+  <h2>二、景点检索</h2>
+  <p class="hint">
+    <input id="kw" type="text" placeholder="输入景点名称关键字，如：布达拉宫" />
+    <button id="btn-search" type="button">搜索</button>
+    <button id="btn-reset" type="button" class="ghost">重置</button>
+  </p>
+  <div id="spot-table"></div>
+  <div id="spot-pager" class="pager"></div>
+</section>
+
+<section class="card" id="detail-card" style="display:none">
+  <h2>三、景点详情：<span id="detail-name"></span></h2>
+  <div id="detail-body"></div>
+
+  <h3>情感分布（按方法对照）</h3>
+  <p class="hint">
+    方法：
+    <select id="sentiment-method">
+      <option value="mllib">mllib（Spark 基线，全量）</option>
+      <option value="deepseek">deepseek（大模型语义）</option>
+    </select>
+  </p>
+  <div id="chart-sentiment" class="chart chart-wide"></div>
+  <div id="sentiment-note"></div>
+
+  <h3>评论量时间趋势</h3>
+  <div id="chart-spot-trend" class="chart chart-wide"></div>
+
+  <h3>方面分析</h3>
+  <p class="hint">样本量不足 10 条的方面不出结论（BR-04），只展示样本量。</p>
+  <div id="aspect-table"></div>
+  <div id="aspect-note"></div>
+
+  <h3>LDA 主题</h3>
+  <div id="topic-body"></div>
+
+  <h3>代表性评论</h3>
+  <div id="review-body"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/spots.js') }}"></script>
+{% endblock %}

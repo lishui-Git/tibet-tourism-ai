@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}数据总览 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}M1 数据总览：规模、评分分布、时间趋势、分档与客源地{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>一、数据集规模与评分分布</h2>
+  <div id="ov-summary" class="stat-grid"></div>
+  <div class="chart-row">
+    <div id="chart-score" class="chart"></div>
+    <div id="chart-scope" class="chart"></div>
+  </div>
+  <div id="ov-summary-note"></div>
+</section>
+
+<section class="card">
+  <h2>二、评论量时间趋势</h2>
+  <p class="hint">
+    粒度：
+    <select id="trend-granularity">
+      <option value="year">按年</option>
+      <option value="month">按月</option>
+    </select>
+  </p>
+  <div id="chart-trend" class="chart chart-wide"></div>
+  <div id="ov-trend-note"></div>
+</section>
+
+<section class="card">
+  <h2>三、景点评论量分档</h2>
+  <div id="chart-bucket" class="chart chart-wide"></div>
+  <div id="ov-bucket-table"></div>
+</section>
+
+<section class="card">
+  <h2>四、客源地分布</h2>
+  <p class="hint">
+    仅统计发布时间 ≥ 2022-08-01 的评论（携程自该日期起才展示 IP 归属地）。
+    显示前
+    <select id="prov-limit">
+      <option value="10">10</option>
+      <option value="20" selected>20</option>
+      <option value="30">30</option>
+    </select>
+    个地区。
+  </p>
+  <div id="chart-province" class="chart chart-wide"></div>
+  <div id="ov-prov-note"></div>
+</section>
+
+<section class="card">
+  <h2>五、数据来源与已知局限</h2>
+  <div id="ov-data-note"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/overview.js') }}"></script>
+{% endblock %}

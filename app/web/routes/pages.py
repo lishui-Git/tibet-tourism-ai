@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
-"""页面路由（阶段一骨架）。
+"""页面路由（展示层）。
 
 详细设计说明书 §2 明确：展示层（HTML + ECharts + axios）**不直连数据库**，
-所有数据经接口层获取；且「不引入前端构建链与框架」（§10）。
-因此这里只渲染一个静态骨架页，数据由页面内的 JS 调用 /api/* 取得。
+所有数据经接口层（`/api/*`）获取；且「不引入前端构建链与框架」（§10）。
+
+页面清单（对应系统六个模块中的业务页面）：
+    `/`            首页（系统说明 + 数据概况 + 环境自检）
+    `/overview`    M1 数据总览
+    `/spots`       M2 景点分析
+    `/evaluation`  M3 景点智能评价
+    `/tasks`       M6 系统管理（任务与口径）
+
+未实现的页面：M4 景点对比、M5 智能问答 —— 它们依赖**在线**模型调用，
+需先设计好在线调用的缓存/限额/降级策略再落地（见 `app/web/README.md` §4）。
 """
 
 from __future__ import annotations
@@ -15,5 +24,29 @@ bp = Blueprint("pages", __name__)
 
 @bp.get("/")
 def index():
-    """骨架首页：证明「Flask 可运行 + 模板可渲染 + 静态资源可加载 + 接口可调用」。"""
-    return render_template("index.html")
+    """首页：系统说明、数据概况与运行自检。"""
+    return render_template("home.html")
+
+
+@bp.get("/overview")
+def overview_page():
+    """M1 数据总览页。"""
+    return render_template("overview.html")
+
+
+@bp.get("/spots")
+def spots_page():
+    """M2 景点分析页。"""
+    return render_template("spots.html")
+
+
+@bp.get("/evaluation")
+def evaluation_page():
+    """M3 景点智能评价页。"""
+    return render_template("evaluation.html")
+
+
+@bp.get("/tasks")
+def tasks_page():
+    """M6 任务与口径页。"""
+    return render_template("tasks.html")

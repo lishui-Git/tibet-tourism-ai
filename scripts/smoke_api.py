@@ -17,6 +17,23 @@ app = create_app()
 client = app.test_client()
 
 CASES = [
+    # --- 页面（展示层，只渲染模板；数据由页面内 JS 调 /api/* 获取） ---
+    ("/", 200, None),
+    ("/overview", 200, None),
+    ("/spots", 200, None),
+    ("/evaluation", 200, None),
+    ("/tasks", 200, None),
+    # --- 静态资源（本地 vendored，运行时不依赖外网/CDN） ---
+    ("/static/vendor/echarts.min.js", 200, None),
+    ("/static/vendor/axios.min.js", 200, None),
+    ("/static/js/common.js", 200, None),
+    ("/static/js/home.js", 200, None),
+    ("/static/js/overview.js", 200, None),
+    ("/static/js/spots.js", 200, None),
+    ("/static/js/evaluation.js", 200, None),
+    ("/static/js/tasks.js", 200, None),
+    ("/static/css/app.css", 200, None),
+    # --- 自检接口 ---
     ("/healthz", 200, 0),
     ("/api/db-ping", 200, 0),
     ("/api/overview/summary", 200, 0),

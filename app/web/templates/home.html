@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}首页 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}离线智能分析结果查询平台 · 首页{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>本系统在做什么</h2>
+  <p class="hint">
+    对「西藏及进藏沿线（川藏／滇藏／青藏线）」旅游景点评论做<strong>离线</strong>智能分析，
+    再把结果持久化到数据库，供本平台查询与展示。
+  </p>
+  <div class="flow">
+    <div class="flow-step"><b>① 数据采集与清洗</b><span>59,033 条评论 / 837 个景点</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><b>② Spark 离线分析</b><span>统计聚合 · MLlib 情感基线 · LDA 主题</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><b>③ DeepSeek 语义分析</b><span>评论语义结构化 · 事实包 · 景点评价</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><b>④ Web 只读查询</b><span>本平台：查统计、看评价、做对比</span></div>
+  </div>
+  <div class="alert">
+    <strong>关键设计：</strong>DeepSeek 只在<strong>离线阶段</strong>把评论语义结构化并落库；
+    本平台<strong>只读数据库</strong>，页面刷新<strong>不会</strong>触发任何模型调用——
+    因此结果可复现、响应稳定、成本可控。
+  </div>
+</section>
+
+<section class="card">
+  <h2>数据概况</h2>
+  <div id="home-stats" class="stat-grid">
+    <div class="stat"><span class="stat-label">加载中…</span></div>
+  </div>
+  <div id="home-note"></div>
+</section>
+
+<section class="card">
+  <h2>结果生产状态（如实展示，避免误读）</h2>
+  <p class="hint">分析结果是分批生产的，页面对"尚未生产"的数据会明确说明，而不是编造数字。</p>
+  <div id="home-coverage"></div>
+</section>
+
+<section class="card">
+  <h2>系统运行自检</h2>
+  <button id="btn-check" type="button">运行数据库自检</button>
+  <pre id="check-out" class="out">点击上方按钮检查「Flask 运行 / MySQL 连接 / 17 张表在位」…</pre>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/home.js') }}"></script>
+{% endblock %}

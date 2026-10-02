@@ -47,8 +47,12 @@
 | `routes/overview.py` | M1 数据总览接口（5 个） |
 | `routes/spots.py` | M2 景点分析 + M3 智能评价接口（9 个） |
 | `routes/admin.py` | M6 系统管理只读接口（3 个） |
-| `routes/pages.py` | 页面路由 `/`（骨架首页） |
-| `templates/`、`static/` | 原生 HTML/CSS/JS（骨架页，业务页面待做） |
+| `routes/pages.py` | 页面路由（5 个页面） |
+| `templates/base.html` | 公共布局：顶部导航、页脚（含"离线生产、只读查询"的架构说明） |
+| `templates/home.html`、`overview.html`、`spots.html`、`evaluation.html`、`tasks.html` | 五个业务页面 |
+| `static/js/common.js` | 公共前端逻辑：`apiGet`、格式化（`fmtInt`/`fmtPct`）、`renderTable`、`caliberNote`、`initChart` |
+| `static/js/{home,overview,spots,evaluation,tasks}.js` | 各页面逻辑 |
+| `static/vendor/{echarts,axios}.min.js` | **本地内置**的 ECharts 5.5.1 与 axios 1.7.7（约 1.06 MB），运行时不依赖外网/CDN |
 
 ## 4. 已实现的接口（前 3 个为自检，其余按详细设计 §6.2 编号）
 
@@ -82,6 +86,24 @@
 > **为什么不先做**：19/20/21/22 需要"在线调用 DeepSeek"，与 §1 的只读原则冲突，
 > 必须先把调用封装、缓存与权限设计清楚；1–4/25 依赖 `sys_user` 与会话。
 > **宁可不实现，也不留"看起来有权限校验其实没有"的接口。**
+
+## 4b. 已实现的页面（5 个）
+
+| 页面 | 路径 | 内容 | 依赖接口 |
+|---|---|---|---|
+| 首页 | `/` | 系统流程说明、数据概况、**结果生产状态**（如实标注哪些结果已生产/待生产）、环境自检 | `/api/overview/summary`、`/healthz`、`/api/db-ping` |
+| M1 数据总览 | `/overview` | 规模与评分分布（饼图）、来源构成（柱图）、时间趋势（折线，年/月切换）、评论量分档、客源地 Top-N、数据说明与局限 | `/api/overview/*` |
+| M2 景点分析 | `/spots` | 景点排行（三种排序）、关键字检索+分页、景点详情（缺失字段显式标注）、情感分布（mllib/deepseek 切换）、年度趋势、方面分析（BR-04 门槛）、LDA 主题词、代表评论 | `/api/spots/*` |
+| M3 智能评价 | `/evaluation` | 选择合格景点 → 综合评价/优势/问题/关注点 + **事实依据回显**（含事实包版本与生成时间）；数据不足时显示原因而非报错 | `/api/spots/{id}/report` |
+| M6 任务与口径 | `/tasks` | 数据口径配置、批处理任务列表（类型/状态/计数/耗时）、任务日志明细（含 ERROR 与处理量） | `/api/admin/*` |
+
+**前端两条纪律**：
+1. **不引入构建链**（§10）：原生 HTML/CSS/JS + ECharts + axios，无 npm、无打包；
+2. **图表库本地内置**：ECharts 与 axios 已下载到 `static/vendor/`，
+   答辩现场断网也能正常渲染（不依赖 CDN）。
+
+未实现的页面：**M4 景点对比**、**M5 智能问答**——它们需要在线调用 DeepSeek，
+与只读原则冲突，须先设计在线调用的缓存、限额与降级策略。
 
 ## 5. 口径纪律（BR-10）
 
@@ -117,8 +139,8 @@ curl.exe "http://127.0.0.1:5000/api/spots/564/report"
 |---|---|
 | 数据层 | ✅ 阶段一导入、阶段二清洗、阶段三 Spark 全量统计（`stat_*`/`sentiment`(mllib)/`topic`） |
 | 语义层 | 🟡 阶段四 C-BAT-05～07 代码完成、32 条真实调用验证通过；**全量 47,701 次待授权** |
-| 接口层 | ✅ 自检 3 个 + 业务只读 17 个（本文件 §4） |
-| 页面层 | ❌ 仅有骨架页，5 个业务页面待做 |
+| 接口层 | ✅ 自检 3 个 + 业务只读 16 个 + 页面 5 个（本文件 §4、§4b） |
+| 页面层 | 🟡 已做 5 个页面（首页 / M1 / M2 / M3 / M6）；M4 对比、M5 问答待做 |
 | 认证/权限 | ❌ 未实现（`sys_user` 表已建） |
 
 > `/healthz` 的 `stage` 字段已与项目实际进度同步（阶段四）；

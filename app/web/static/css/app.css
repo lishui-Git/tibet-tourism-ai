@@ -80,3 +80,142 @@ table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { border: 1px solid var(--c-line); padding: 8px 12px; text-align: left; vertical-align: top; }
 th { background: #eef3f9; width: 128px; font-weight: 600; white-space: nowrap; }
 code { background: #eef3f9; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+
+/* =============================================================================
+   业务页面样式（M1/M2/M3/M6）：导航、统计卡、图表、表格、标签、评价版式
+   ============================================================================= */
+
+/* --- 顶部导航 --- */
+.topbar-inner {
+  max-width: 1180px; margin: 0 auto;
+  display: flex; flex-wrap: wrap; gap: 16px;
+  align-items: center; justify-content: space-between;
+}
+.brand h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.brand .subtitle { margin: 4px 0 0; opacity: .85; font-size: 13px; }
+.mainnav { display: flex; flex-wrap: wrap; gap: 6px; }
+.mainnav a {
+  color: #fff; text-decoration: none; font-size: 14px;
+  padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,.12);
+}
+.mainnav a:hover { background: rgba(255,255,255,.24); }
+
+.wrap { max-width: 1180px; }
+.card h3 { margin: 22px 0 8px; font-size: 15px; border-left: 3px solid var(--c-primary); padding-left: 8px; }
+.card h4 { margin: 16px 0 6px; font-size: 14px; }
+
+/* --- 提示块 --- */
+.alert {
+  margin: 12px 0; padding: 10px 14px;
+  background: #eef3f9; border-left: 4px solid var(--c-primary);
+  border-radius: 4px; font-size: 13.5px; line-height: 1.75;
+}
+.alert.warn { background: #fff8e1; border-left-color: #ef6c00; }
+.alert.bad { background: #fdecea; border-left-color: var(--c-bad); }
+
+/* --- 口径说明（BR-10） --- */
+.caliber {
+  margin-top: 10px; padding: 8px 12px;
+  background: #f6f8fb; border: 1px dashed var(--c-line);
+  border-radius: 4px; font-size: 12.5px; color: var(--c-muted);
+}
+.limits { margin: 6px 0 0 18px; font-size: 13px; color: var(--c-muted); }
+
+/* --- 统计卡片 --- */
+.stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px; margin: 12px 0;
+}
+.stat {
+  background: #f8fafd; border: 1px solid var(--c-line); border-radius: 6px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 2px;
+}
+.stat-label { font-size: 12.5px; color: var(--c-muted); }
+.stat-value { font-size: 21px; font-weight: 600; color: var(--c-primary); }
+.stat-sub { font-size: 12px; color: var(--c-muted); }
+
+/* --- 图表 --- */
+.chart-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.chart { width: 100%; height: 320px; margin: 8px 0; }
+.chart-wide { height: 360px; }
+
+/* --- 数据表 --- */
+.data-table { margin: 10px 0; }
+.data-table th, .data-table td { font-size: 13px; padding: 7px 10px; }
+.data-table thead th { width: auto; background: #eef3f9; white-space: nowrap; }
+.data-table tbody tr:nth-child(even) { background: #fafcfe; }
+.link { color: var(--c-primary); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.muted { color: var(--c-muted); }
+
+/* --- 标签 --- */
+.tag {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 12px; background: #eef3f9; color: var(--c-muted);
+}
+.tag.ok { background: #e8f5e9; color: var(--c-ok); }
+.tag.warn { background: #fff3e0; color: #ef6c00; }
+.tag.bad { background: #fdecea; color: var(--c-bad); }
+
+/* --- 分页 --- */
+.pager { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; }
+button.ghost { background: #eef3f9; color: var(--c-text); }
+button.small { padding: 4px 10px; font-size: 12px; }
+input[type=text], select {
+  padding: 7px 10px; border: 1px solid var(--c-line); border-radius: 6px;
+  font-size: 14px; background: #fff;
+}
+input[type=text] { min-width: 240px; }
+
+/* --- 流程示意（首页） --- */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0; }
+.flow-step {
+  flex: 1 1 180px; background: #f8fafd; border: 1px solid var(--c-line);
+  border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px;
+}
+.flow-step b { font-size: 13.5px; }
+.flow-step span { font-size: 12px; color: var(--c-muted); }
+.flow-arrow { color: var(--c-primary); font-weight: 600; }
+
+/* --- 智能评价版式 --- */
+.rep-summary {
+  background: #f8fafd; border-left: 4px solid var(--c-primary);
+  border-radius: 4px; padding: 12px 16px; margin: 12px 0;
+}
+.rep-summary p { margin: 6px 0 0; line-height: 1.9; }
+.rep-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.rep-col { background: #fff; border: 1px solid var(--c-line); border-radius: 6px; padding: 10px 14px; }
+.rep-col ul { margin: 6px 0 0 18px; font-size: 13.5px; line-height: 1.85; }
+.rep-col.pos { border-top: 3px solid var(--c-ok); }
+.rep-col.neg { border-top: 3px solid var(--c-bad); }
+.rep-col.focus { border-top: 3px solid var(--c-primary); }
+
+/* --- 代表评论 --- */
+.review {
+  border: 1px solid var(--c-line); border-left-width: 4px;
+  border-radius: 4px; padding: 8px 12px; margin: 8px 0; background: #fff;
+}
+.review.pos { border-left-color: var(--c-ok); }
+.review.neg { border-left-color: var(--c-bad); }
+.review-meta { font-size: 12px; color: var(--c-muted); margin-bottom: 4px; }
+.review-text { font-size: 13.5px; line-height: 1.8; }
+
+/* --- 主题 --- */
+.topic { border: 1px solid var(--c-line); border-radius: 6px; padding: 10px 14px; margin: 8px 0; background: #fff; }
+.topic-head { font-size: 13.5px; font-weight: 600; margin-bottom: 6px; }
+.topic-head .muted { font-weight: 400; margin-left: 8px; font-size: 12px; }
+.topic-words { display: flex; flex-wrap: wrap; gap: 6px; }
+.kw { background: #eef3f9; border-radius: 10px; padding: 2px 10px; font-size: 12.5px; }
+
+/* --- 口径列表 --- */
+.caliber-item { border-bottom: 1px dashed var(--c-line); padding: 8px 0; }
+.caliber-item:last-child { border-bottom: 0; }
+.caliber-key { font-size: 13.5px; font-weight: 600; }
+.caliber-desc { font-size: 13px; color: var(--c-muted); margin-top: 3px; }
+
+/* --- 页脚 --- */
+.footer {
+  max-width: 1180px; margin: 0 auto 40px; padding: 0 16px;
+  color: var(--c-muted); font-size: 12.5px; line-height: 1.8;
+}
+

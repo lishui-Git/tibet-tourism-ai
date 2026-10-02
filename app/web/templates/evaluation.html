@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}智能评价 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}M3 景点智能评价：离线生成的综合评价与事实依据{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>景点智能评价</h2>
+  <p class="hint">
+    评价由离线任务（DeepSeek）生成并落库；本页<strong>只读取结果</strong>，不产生模型调用。
+    评论量不足 100 条的景点不生成评价（BR-02/BR-03），页面会明确说明原因。
+  </p>
+  <p class="hint">
+    <select id="eval-spot">
+      <option value="">— 选择具备评价资格的景点（评论量 ≥100）—</option>
+    </select>
+    <button id="btn-load-report" type="button">查看评价</button>
+  </p>
+  <div id="eval-body"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/evaluation.js') }}"></script>
+{% endblock %}
