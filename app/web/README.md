@@ -126,6 +126,10 @@
 # 接口冒烟测试（本地 test_client，不启端口、零 API 调用、零写库）
 .\.venv\Scripts\python.exe scripts\smoke_api.py
 
+# 接口字段契约校验：逐个断言"前端依赖的字段"确实存在（168 个字段）
+#   —— 冒烟测试查不出"页面取了不存在的字段"这类静默空白问题，本脚本专门补这个盲区
+.\.venv\Scripts\python.exe scripts\check_api_contract.py
+
 # 手工抽查
 curl.exe "http://127.0.0.1:5000/api/overview/summary"
 curl.exe "http://127.0.0.1:5000/api/spots/564"
