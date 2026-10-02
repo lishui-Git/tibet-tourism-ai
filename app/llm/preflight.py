@@ -56,6 +56,7 @@ class Preflight:
     counts: dict[str, int] = field(default_factory=dict)
     workload: dict[str, int] = field(default_factory=dict)
     integrity: dict[str, int] = field(default_factory=dict)
+    layering: dict[str, int] = field(default_factory=dict)
     core_tables: list[dict[str, Any]] = field(default_factory=list)
     cost: dict[str, Any] = field(default_factory=dict)
     issues: list[str] = field(default_factory=list)      # 阻断项（BLOCKED）
@@ -71,6 +72,7 @@ class Preflight:
             "counts": self.counts,
             "workload": self.workload,
             "integrity": self.integrity,
+            "layering": self.layering,
             "core_tables": self.core_tables,
             "cost": self.cost,
             "issues": self.issues,
@@ -180,6 +182,66 @@ INTEGRITY_SQL = {
                                   "WHERE se.comment_id IS NULL",
 }
 
+# 「分层自洽性」检查（只读）：证明 59,033 条评论被三层**恰好覆盖一次**，没有静默丢弃。
+# 这一组检查回答的是"会不会有评论被漏掉却没人发现"——单看各层计数无法证明，
+# 必须验证"三层 = 可分析总量"这个**互斥且穷尽**的划分。
+#
+# 划分口径（严格对齐 `app/batch/semantic_analysis.py` 的两条待处理 SQL + 规则定义）：
+#   规则层 = **所有**低信息量（正文 ≤10 字），无论是否重复组成员  → BR-05
+#   复用层 = 重复组中除代表外的成员，且**自身不是**低信息量       → BR-06
+#   调用层 = 其余（真正进入模型）
+# 实测数据印证了这一口径：1,071 条待复用成员全部 `is_low_info=0`；
+# 2,583 条"低信息量的重复组成员"历史运行中已由规则层处理（与 BR-05 一致）。
+#
+# 注意：一个评论可能"既低信息量、又是重复组成员"——这类归**规则层**（不进入模型）。
+# 若在复用层里重复计入，三层之和就会超过可分析总量（首版划分即犯此错，被本检查当场抓出）。
+_LAYER_REUSE_CTE = """
+    SELECT r.comment_id
+      FROM review r
+      JOIN (SELECT g.dup_group_id, g.comment_id AS rep_id
+              FROM (SELECT comment_id, dup_group_id, is_low_info, content_length,
+                           ROW_NUMBER() OVER (PARTITION BY dup_group_id
+                               ORDER BY is_low_info ASC, content_length DESC, comment_id ASC) AS rn
+                      FROM review WHERE is_dup_content = 1 AND dup_group_id IS NOT NULL) g
+             WHERE g.rn = 1) rep ON rep.dup_group_id = r.dup_group_id
+     WHERE r.is_dup_content = 1 AND r.dup_group_id IS NOT NULL AND r.comment_id <> rep.rep_id
+       AND r.is_low_info = 0
+"""
+
+LAYERING_SQL: dict[str, str] = {
+    # 可分析总量：正文非空（正文为空的 1 条不参与任何层，单独确认）
+    "analyzable": "SELECT COUNT(*) FROM review WHERE content IS NOT NULL AND TRIM(content) <> ''",
+    # 规则层：全部低信息量（不进入模型）—— 与 `low_info_total` 同口径，便于交叉核对
+    "layer_rule_total": "SELECT COUNT(*) FROM review WHERE content IS NOT NULL AND TRIM(content) <> '' "
+                        "AND (is_low_info = 1 OR CHAR_LENGTH(TRIM(content)) <= 10)",
+    "layer_rule_done": "SELECT COUNT(*) FROM review r JOIN comment_semantic cs ON cs.comment_id = r.comment_id "
+                       "WHERE cs.source = 'rule'",
+    # 复用层：非低信息量的重复组非代表成员（复制代表结果，零调用）
+    "layer_reuse_total": f"SELECT COUNT(*) FROM ({_LAYER_REUSE_CTE}) t",
+    "layer_reuse_done": "SELECT COUNT(*) FROM comment_semantic WHERE source = 'reuse'",
+    # 调用层：既非低信息量、又非复用成员的其余评论（真正进入模型）
+    "layer_call_total": f"""
+        SELECT COUNT(*) FROM review r
+         WHERE r.content IS NOT NULL AND TRIM(r.content) <> ''
+           AND NOT (r.is_low_info = 1 OR CHAR_LENGTH(TRIM(r.content)) <= 10)
+           AND r.comment_id NOT IN ({_LAYER_REUSE_CTE})
+    """,
+    # 调用层已完成：只数**调用层口径内**的已完成（其余不含低信息量、也不含重复组成员）。
+    # 若直接数 `sentiment` 全表，会把规则层/复用层复制过来的行也算成"模型已完成"，
+    # 导致 `pending ≠ 总量 − 已完成`（这一处口径错误由本节的一致性检查当场抓出）。
+    "layer_call_done": "SELECT COUNT(*) FROM review r JOIN sentiment se ON se.comment_id = r.comment_id "
+                       "AND se.method='deepseek' "
+                       "WHERE r.content IS NOT NULL AND TRIM(r.content) <> '' "
+                       "AND NOT (r.is_low_info = 1 OR CHAR_LENGTH(TRIM(r.content)) <= 10) "
+                       "AND r.is_dup_content = 0",
+    # 异常组合（正常应全为 0）
+    "rule_row_on_normal": "SELECT COUNT(*) FROM review r JOIN comment_semantic cs ON cs.comment_id = r.comment_id "
+                          "WHERE cs.source='rule' AND r.is_low_info = 0 "
+                          "AND CHAR_LENGTH(TRIM(r.content)) > 10",
+    "empty_content_in_any_layer": "SELECT COUNT(*) FROM comment_semantic cs JOIN review r ON r.comment_id = cs.comment_id "
+                                  "WHERE r.content IS NULL OR TRIM(r.content) = ''",
+}
+
 
 def _scalar(sql: str) -> int:
     row = query_one(sql) or {}
@@ -262,6 +324,7 @@ def collect() -> Preflight:
     }
 
     result.integrity = {key: _scalar(sql) for key, sql in INTEGRITY_SQL.items()}
+    result.layering = {key: _scalar(sql) for key, sql in LAYERING_SQL.items()}
     result.core_tables = core_table_checks()
 
     # ---- 阻断项（BLOCKED 的判据）-------------------------------------------
@@ -293,6 +356,45 @@ def collect() -> Preflight:
     # 事实包 / 评价必须先有评论级语义结果，否则会生成"无证据"的评价
     if result.counts["fact_package_done"] and not result.counts["deepseek_done"]:
         issues.append("存在事实包但没有任何 DeepSeek 语义结果：事实包缺少证据来源")
+
+    # ---- 分层自洽性：三层是否**恰好覆盖**全部可分析评论（不重不漏）----------
+    layer = result.layering
+    layer_sum = layer["layer_rule_total"] + layer["layer_reuse_total"] + layer["layer_call_total"]
+    if layer_sum != layer["analyzable"]:
+        # 说明存在既不属于低信息量、也不属于重复组成员、又没有被计入调用层的评论——
+        # 这类评论会被"静默跳过"，永远拿不到结果，且从各层计数上看不出来。
+        issues.append(
+            f"分层不覆盖：低信息量 {layer['layer_rule_total']} + 重复组成员 {layer['layer_reuse_total']} "
+            f"+ 其余 {layer['layer_call_total']} = {layer_sum} ≠ 可分析评论 {layer['analyzable']}"
+            f"（差值 {layer['analyzable'] - layer_sum} 条会被静默跳过）"
+        )
+    for key, label in (
+        ("rule_row_on_normal", "非低信息量评论被写成了规则层结果"),
+        ("empty_content_in_any_layer", "正文为空的评论被写入了结果表（不应参与分析）"),
+    ):
+        if layer.get(key):
+            issues.append(f"分层异常：{label}（{layer[key]} 条）")
+
+    # 「待处理为 0」必须真的等于"该层已全部完成"。
+    # 否则 preflight 会一边显示"待处理 0 条"、一边把工作量算少，全量跑完仍留下没结果的评论。
+    rule_pending = result.counts.get("rule_pending", 0)
+    if rule_pending == 0 and layer.get("layer_rule_done", 0) != layer.get("layer_rule_total", 0):
+        issues.append(
+            f"分层自相矛盾：规则层显示待处理 0 条，但已完成 {layer.get('layer_rule_done')} 条 "
+            f"≠ 规则层总量 {layer.get('layer_rule_total')} 条"
+        )
+    reuse_pending = result.counts.get("reuse_pending", 0)
+    if reuse_pending == 0 and layer.get("layer_reuse_done", 0) != layer.get("layer_reuse_total", 0):
+        issues.append(
+            f"分层自相矛盾：复用层显示待处理 0 条，但已完成 {layer.get('layer_reuse_done')} 条 "
+            f"≠ 复用层总量 {layer.get('layer_reuse_total')} 条"
+        )
+    # 调用层待处理应与 pending 计数一致（两处口径必须对上）
+    if result.counts.get("call_pending", 0) != layer.get("layer_call_total", 0) - layer.get("layer_call_done", 0):
+        issues.append(
+            f"调用层口径不一致：pending {result.counts.get('call_pending')} 条 ≠ "
+            f"调用层总量 {layer.get('layer_call_total')} − 已完成 {layer.get('layer_call_done')}"
+        )
     result.issues = issues
 
     # ---- 提示项（不阻断，但必须知情）---------------------------------------
@@ -347,6 +449,20 @@ def print_report(preflight: Preflight | None = None) -> dict[str, Any]:
     print(f"  调用层 已完成 DeepSeek: {counts['deepseek_api_done']} 条（真实 API 结果）")
     print(f"  调用层 待处理         : {counts['call_pending']} 条（其中重复组代表 {counts['dup_representatives_in_pending']} 条）")
     print(f"  复用层 待处理         : {counts['reuse_pending']} 条（复用代表结果，零 API）")
+
+    # 分层覆盖：证明"没有评论被静默跳过"（各层计数本身证明不了这一点）
+    layer = pf.layering
+    if layer:
+        layer_sum = layer["layer_rule_total"] + layer["layer_reuse_total"] + layer["layer_call_total"]
+        mark = "✓" if layer_sum == layer["analyzable"] else "✗"
+        print(f"\n[2b] 分层覆盖自洽性（证明可分析评论被恰好覆盖一次）")
+        print(f"  {mark} 低信息量 {layer['layer_rule_total']} + 重复组成员 {layer['layer_reuse_total']}"
+              f" + 其余 {layer['layer_call_total']} = {layer_sum}"
+              f" / 可分析评论 {layer['analyzable']}（正文为空 {counts['empty_content']} 条不参与）")
+        print(f"    已完成：规则 {layer['layer_rule_done']}/{layer['layer_rule_total']}、"
+              f"复用 {layer['layer_reuse_done']}/{layer['layer_reuse_total']}、"
+              f"模型 {layer['layer_call_done']}/{layer['layer_call_total']}"
+              f"（各层已完成不超过总量；模型层待处理 = 总量 − 已完成）")
 
     print("\n[3] 后续两阶段现状")
     print(f"  事实包 spot_fact_package : {counts['fact_package_done']} 行（C-BAT-06，零 API）")
