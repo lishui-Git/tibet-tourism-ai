@@ -185,6 +185,14 @@ INTEGRITY_SQL = {
     # 说明：31 条真实结果写入时还没有该字段，因此它们读作"无标记"（即真实），这是正确的。
     "mock_rows_in_results": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
                             "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode')) = 'mock'",
+    # 「测试痕迹」= mock 行 + 复用行（`mode` 为 mock/reuse）。
+    # 为什么把 **reuse 也纳入**：复用行同样不该在"尚未全量运行"的库中长期残留，
+    # 且它曾经不带标记；实测踩到过 11 条 mock + 4 条复用一起残留，
+    # 其中复用行因无标记而与真实结果无法区分。现在两者都可被精确定位。
+    # 注意：全量运行**正常**产生的复用行（`mode='reuse'`）也会计入这里——
+    # 它不参与"真实 API 完成数"口径，仅作为"库内有无测试残留/复用副本"的可见指标。
+    "test_trace_rows_in_results": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
+                                  "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode')) IN ('mock','reuse')",
 }
 
 # 「分层自洽性」检查（只读）：证明 59,033 条评论被三层**恰好覆盖一次**，没有静默丢弃。

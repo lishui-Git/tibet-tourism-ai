@@ -55,6 +55,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_spot_report_write_failure.py", "景点评价写库失败兜底（注入写库失败 → 批次继续 + 落盘待补）", False),
     ("test_layering.py", "分层自洽性（三层互斥穷尽 + 待处理口径吻合，证明无评论被静默跳过）", False),
     ("test_spot_threshold.py", "BR-02/BR-03 评价门槛（<100 条只给基础统计 + 明确提示）", False),
+    ("test_br09_analysis_dimensions.py", "BR-09 分析维度（统计可由 review 复算、分析表不含描述字段）", False),
     ("test_cross_phase_numbers.py", "跨阶段数字自洽（阶段二 47,149 与阶段四 47,733 的差可完整解释）", False),
     ("test_resume_cursor.py", "断点续跑实证（游标=结果表；插 1 行 → 计划调用恰减 1）", False),
     ("test_cost_projection.py", "计划阶段预估一致性（preflight ↔ dry-run 数字对得上）", False),

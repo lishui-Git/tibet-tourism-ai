@@ -436,6 +436,35 @@ def verify_spot_report(packages: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def purge_test_traces() -> int:
+    """删除结果表里"带测试标记"的行（`raw_json.mode` 为 `mock` 或 `reuse`），返回删除条数。
+
+    只认**标记**，因此绝不会误删真实结果：31 条真实写入时还没有 `mode` 字段，
+    读作"无标记"；而 mock 行由 `MockClient` 路径写入 `mode='mock'`、
+    复用行写入 `mode='reuse'`（本轮补上该标记，此前复用行没有标记、无法区分）。
+
+    范围限于本脚本会写的三张表：`sentiment`(deepseek) / `comment_semantic` / `aspect`。
+    """
+    marked: list[int] = []
+    with connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT comment_id FROM sentiment WHERE method='deepseek' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode')) IN ('mock','reuse')"
+            )
+            marked = [int(r["comment_id"]) for r in cur.fetchall()]
+            if not marked:
+                return 0
+            ph = ",".join(["%s"] * len(marked))
+            cur.execute(f"DELETE FROM aspect WHERE comment_id IN ({ph})", tuple(marked))
+            cur.execute(f"DELETE FROM comment_semantic WHERE comment_id IN ({ph})", tuple(marked))
+            cur.execute(
+                f"DELETE FROM sentiment WHERE method='deepseek' AND comment_id IN ({ph})",
+                tuple(marked),
+            )
+    return len(marked)
+
+
 def snapshot_results() -> dict[str, set[int]]:
     """记录验证开始前**已存在**的结果 ID。
 
@@ -572,6 +601,17 @@ def main(argv: list[str] | None = None) -> int:
     if not precheck_clean():
         return 2
 
+    # 【自愈】先把上一次"非正常退出"留下的测试痕迹清掉，再取快照。
+    # 为什么必须有这一步（实测踩到的坑）：
+    #   若本脚本在**写入之后、清理之前**被强杀（例如外部中断），`finally` 不会执行，
+    #   于是 mock/复用行会残留在结果表里。更糟的是：**下一次运行时，
+    #   这些残留会被并进快照**，从而被当成"验证前就存在的真实数据"而**永不被清理**——
+    #   污染会变得"粘住"，只能靠人工发现（这次就是被 preflight 的 mock 检查抓出来的）。
+    #   在取快照前清掉它们，使脚本对"被中断"具备自愈能力。
+    purged = purge_test_traces()
+    if purged:
+        print(f"[自愈] 清理上次残留的测试痕迹：{purged} 条（mock/复用行）")
+
     global SNAPSHOT
     SNAPSHOT = snapshot_results()
 
@@ -609,6 +649,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"（清理前 {json.dumps(before_cleanup, ensure_ascii=False)}）",
             )
             print("\n已清理本次验证新写入的数据；库内原有结果保留：" + json.dumps(left, ensure_ascii=False))
+            # 【安全网】无论快照逻辑如何，收尾都必须确保没有带标记的测试行残留。
+            # 取快照前也清了一次（见 purge_test_traces）；这里是最后一道保险，
+            # 因为"残留会被并进下次快照"会让污染粘住，必须在每次运行结束时归零。
+            leftover = purge_test_traces()
+            check("收尾后无 mock/复用测试痕迹残留（防污染被下次快照吸收）",
+                  leftover == 0, f"又清掉 {leftover} 条" if leftover else "0 条")
         else:
             print("\n按 --keep 保留测试数据（记得手工清理，避免假数据混入真实结果）")
 

@@ -931,6 +931,14 @@ def _write_reuse_rows(conn, reuse_rows: Sequence[tuple[dict, dict]], stats: Sema
                     "source": (semantic_map.get(rep_id) or {}).get("source") or "deepseek",
                     "raw": {
                         "source": "reuse",
+                        # 【必须标记 mode】与 `_build_api_record` 的 `mode` 字段对齐。
+                        # 为什么：`comment_semantic.source` 会被后续重跑**覆盖**
+                        # （同一 comment_id upsert 时 source 可能被写回 'deepseek'），
+                        # 一旦被覆盖，这条复用行就再也认不出来——
+                        # 实测踩到过：11 条 mock 行 + 4 条复用行残留在结果表里，
+                        # 其中复用行因无标记而与"真实结果"无法区分。
+                        # 写进 raw_json 后，它与 mock 行一样可以被 SQL 精确定位与清理。
+                        "mode": "reuse",
                         "prompt_version": SEMANTIC_PROMPT_VERSION,
                         "reused_from_comment_id": rep_id,
                         # 复用不产生新的 API 费用，因此 usage 记为 0（便于成本核算时区分）
