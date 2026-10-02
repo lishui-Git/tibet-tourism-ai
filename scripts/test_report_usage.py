@@ -130,6 +130,21 @@ def main() -> int:
     check("两种口径确实不同（说明修复影响实际金额）", naive != real,
           f"差 ¥{round(abs(naive - real), 4)}")
 
+    # ---------- D. 两个生成组件的费用字段必须同形（否则汇总要写特例） ----------
+    print("\n[D] C-BAT-05 与 C-BAT-07 的费用字段形状一致")
+    from app.batch.semantic_analysis import estimate_cost as semantic_cost
+
+    semantic_shape = set(semantic_cost(stats).keys())
+    report_shape = set(_estimate_cost(stats).keys())
+    check("两个组件报告的字段集合完全相同", semantic_shape == report_shape,
+          ("差异：仅 " + str(sorted(semantic_shape ^ report_shape))) if semantic_shape != report_shape
+          else f"{len(report_shape)} 个字段一致")
+    check("都按实际 token 拆分计算（不是估算键名）",
+          "cost_input_cny" in report_shape and "cost_output_cny" in report_shape,
+          f"keys={sorted(report_shape)}")
+    check("都给出单次平均 token（便于与实测口径核对）",
+          "avg_tokens_per_call" in report_shape, "")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
     print("\n" + "=" * 84)

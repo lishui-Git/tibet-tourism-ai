@@ -154,7 +154,22 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 > 比例猜错就会算错钱。现已改为返回**真实用量**（含 prompt/completion 拆分，修复轮累加），
 > 费用按 `prompt/1e6×单价_in + completion/1e6×单价_out` 精确计算，
 > 结果字段也从 `cost_total_cny_estimated` 改名为 `cost_total_cny`（口径变了，名字要跟着变）。
-> 由 `scripts/test_report_usage.py`（11 项）固定：断言拆分保留、费用与手算一致、修复轮累加。
+> 由 `scripts/test_report_usage.py`（14 项）固定：断言拆分保留、费用与手算一致、
+> 修复轮累加、**且两个组件的费用字段形状必须一致**（见下）。
+
+#### 两个组件的费用字段（刻意保持同形）
+
+| 字段 | 含义 |
+|---|---|
+| `prompt_tokens` / `completion_tokens` / `total_tokens` | 本次运行的**实际**用量（修复轮已累加） |
+| `price_input_per_million` / `price_output_per_million` | 计算所用的单价（来自 `settings.deepseek`，可配置） |
+| `cost_input_cny` / `cost_output_cny` / `cost_total_cny` | 按实际拆分算出的**实际**费用（元） |
+| `avg_tokens_per_call` | 单次平均 token（便于与 §8.2 实测口径交叉核对） |
+
+> **为什么必须同形**：C-BAT-05 与 C-BAT-07 各报一套字段的话，费用汇总就要写特例分支，
+> 也容易漏算其中一项。现在 `semantic_analysis.estimate_cost()` 与
+> `spot_report._estimate_cost()` 返回**完全相同的 9 个键**，
+> 并由测试断言"两个组件字段集合完全相同"——**形状漂移会被立刻发现**。
 
 > **同一套兜底也覆盖景点评价（C-BAT-07）**：`run_spot_report` 的写库失败同样会
 > "只重试写库 → 落盘待补 → 记 `task_log`(ERROR) 并继续下一个景点"，

@@ -343,20 +343,27 @@ def _usage_result(usage: dict[str, int]):
 
 
 def _estimate_cost(call_stats: CallStats) -> dict[str, Any]:
-    """景点级成本（按**实际**输入/输出 token 与单价计算，不再用经验比例估算）。"""
+    """景点级成本（按**实际**输入/输出 token 与单价计算，不再用经验比例估算）。
+
+    字段与 `semantic_analysis.estimate_cost()` **保持同一形状**：
+    两个生成组件若各报一套字段，费用汇总时就要写特例代码，也容易漏算。
+    """
     from app.config import settings
 
-    cost = (
-        call_stats.prompt_tokens / 1_000_000 * settings.deepseek.price_input
-        + call_stats.completion_tokens / 1_000_000 * settings.deepseek.price_output
-    )
+    price_in = settings.deepseek.price_input
+    price_out = settings.deepseek.price_output
+    cost_in = call_stats.prompt_tokens / 1_000_000 * price_in
+    cost_out = call_stats.completion_tokens / 1_000_000 * price_out
     return {
         "prompt_tokens": call_stats.prompt_tokens,
         "completion_tokens": call_stats.completion_tokens,
         "total_tokens": call_stats.total_tokens,
-        "cost_total_cny": round(cost, 4),
-        "price_input_per_million": settings.deepseek.price_input,
-        "price_output_per_million": settings.deepseek.price_output,
+        "price_input_per_million": price_in,
+        "price_output_per_million": price_out,
+        "cost_input_cny": round(cost_in, 4),
+        "cost_output_cny": round(cost_out, 4),
+        "cost_total_cny": round(cost_in + cost_out, 4),
+        "avg_tokens_per_call": round(call_stats.total_tokens / call_stats.requests, 1) if call_stats.requests else 0,
     }
 
 
