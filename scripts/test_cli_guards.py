@@ -151,6 +151,32 @@ def main() -> int:
           "mock" in INTEGRITY_SQL.get("test_trace_rows_in_results", "")
           and "reuse" in INTEGRITY_SQL.get("test_trace_rows_in_results", ""), "")
 
+    # ---------- F3. 跨表一致性：半成品必须被检出且值得阻断 ----------
+    print("\n[F3] 跨表一致性检查（防『提交粒度被破坏』留下半成品）")
+    from app.llm.preflight import collect
+
+    pf = collect()
+    # 正向：三张表必须同进同出（有情感就该有语义），否则游标会认为"已做完"、永不补写
+    for key in ("semantic_without_sentiment", "sentiment_without_semantic",
+                "orphan_aspect", "orphan_aspect_review"):
+        check(f"{key} 在干净库上为 0（不误报）", pf.integrity.get(key) == 0,
+              str(pf.integrity.get(key)))
+    check("这些一致性检查确实在 SQL 里定义了",
+          all(k in INTEGRITY_SQL for k in
+              ("semantic_without_sentiment", "sentiment_without_semantic",
+               "orphan_aspect", "orphan_aspect_review")), "")
+    check("aspect 孤儿检查按 method='deepseek' 限定（不误伤 mllib 基线）",
+          "method='deepseek'" in INTEGRITY_SQL["orphan_aspect"], "")
+    # 反向：确认它们真的接入了**阻断判据清单**（而不是只查不管）。
+    # 阻断逻辑内嵌在 `collect()` 里，因此检查其源码文本。
+    import inspect
+
+    from app.llm.preflight import collect as _collect
+
+    src = inspect.getsource(_collect)
+    for key in ("sentiment_without_semantic", "orphan_aspect", "orphan_aspect_review"):
+        check(f"{key} 已接入阻断判据（不是只查不管）", key in src, "")
+
     # ---------- G. 不相关选项必须被提示（而不是静默忽略） ----------
     print("\n[G] 阶段不相关的选项要明确提示（避免生产时误判为『参数坏了』）")
     import io

@@ -180,6 +180,21 @@ INTEGRITY_SQL = {
     "semantic_without_sentiment": "SELECT COUNT(*) FROM comment_semantic cs "
                                   "LEFT JOIN sentiment se ON se.comment_id = cs.comment_id AND se.method='deepseek' "
                                   "WHERE se.comment_id IS NULL",
+    # 反方向：有 deepseek 情感行却没有 comment_semantic 行。
+    # 为什么重要：若进程在"写完 sentiment、还没写 comment_semantic"时**跨事务**退出，
+    # 游标（=`NOT EXISTS(sentiment)`）会认为这条已做完，于是**永远不再补写**语义行——
+    # 库里就留下一条"有情感、无语义"的半成品。正常情况下三表在**同一事务**内提交，
+    # 因此该值必须为 0；一旦非 0 就说明提交粒度被破坏，必须查清。
+    "sentiment_without_semantic": "SELECT COUNT(*) FROM sentiment se "
+                                  "LEFT JOIN comment_semantic cs ON cs.comment_id = se.comment_id "
+                                  "WHERE se.method='deepseek' AND cs.comment_id IS NULL",
+    # aspect 的孤儿行：`write_records` 对 aspect 是"先删后插"，若事务被破坏可能留下孤儿。
+    "orphan_aspect": "SELECT COUNT(*) FROM aspect a "
+                     "WHERE NOT EXISTS (SELECT 1 FROM sentiment se "
+                     "                   WHERE se.comment_id = a.comment_id AND se.method='deepseek')",
+    "orphan_aspect_review": "SELECT COUNT(*) FROM aspect a "
+                            "LEFT JOIN review r ON r.comment_id = a.comment_id "
+                            "WHERE r.comment_id IS NULL",
     # mock 标记行（`raw_json.mode='mock'`）：mock 假结果与真实结果在库里长得一样，
     # 混进结果表会直接污染"真实 API 完成数"与费用核算，必须能被检出（正常应为 0）。
     # 说明：31 条真实结果写入时还没有该字段，因此它们读作"无标记"（即真实），这是正确的。
@@ -365,6 +380,12 @@ def collect() -> Preflight:
         "orphan_review",
         "evidence_not_in_content",
         "semantic_without_sentiment",
+        # 跨表一致性的"反方向"与 aspect 孤儿：见 INTEGRITY_SQL 里的注释。
+        # 这三项正常都应为 0；一旦非 0 说明"同事务提交"的保证被破坏，
+        # 会留下半成品（例如有情感无语义），必须查清后再全量运行。
+        "sentiment_without_semantic",
+        "orphan_aspect",
+        "orphan_aspect_review",
     )
     issues: list[str] = []
     for key in blocking_keys:
