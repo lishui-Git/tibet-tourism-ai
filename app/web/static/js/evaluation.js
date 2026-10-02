@@ -101,9 +101,56 @@ async function loadReport() {
   }
 }
 
+/** 只有管理员才显示"重新生成评价"按钮（接口 19 需管理员）。
+    该按钮只**登记请求**，不产生任何模型调用——真正生成由离线批处理执行。 */
+async function setupRegenButton() {
+  const btn = document.getElementById('btn-regen');
+  try {
+    const me = await apiGet('/api/auth/me');
+    if (me && me.is_admin) btn.style.display = '';
+  } catch (e) {
+    btn.style.display = 'none';  // 未登录/非管理员：不显示
+  }
+}
+
+async function doRegenerate() {
+  const spotId = document.getElementById('eval-spot').value;
+  const box = document.getElementById('eval-body');
+  if (!spotId) {
+    box.innerHTML = window.UI.empty('请先选择一个景点。', 'warn');
+    return;
+  }
+  const btn = document.getElementById('btn-regen');
+  btn.disabled = true;
+  try {
+    const resp = await axios.post(`/api/spots/${spotId}/report/regenerate`);
+    const body = resp.data || {};
+    if (body.code !== 0) {
+      box.innerHTML = `<div class="alert bad">提交失败：${escapeHtml(body.message || '')}（code=${body.code}）</div>`;
+      return;
+    }
+    const d = body.data || {};
+    box.innerHTML = d.submitted
+      ? `<div class="alert">
+           <strong>重新生成请求已提交</strong>（任务 #${d.task_id}，状态 pending）。<br/>
+           ${escapeHtml(d.message_text || '')}<br/>
+           <span class="muted">本接口只登记请求，不产生模型调用；实际生成与费用发生在离线批处理。</span>
+         </div>`
+      : `<div class="alert warn">${escapeHtml(d.message_text || '该景点不生成智能评价。')}</div>`;
+  } catch (e) {
+    const data = e.response && e.response.data;
+    box.innerHTML = `<div class="alert bad">提交失败：${escapeHtml((data && data.message) || e.message)}
+      ${data ? `（code=${data.code}）` : ''}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadSpotOptions();
+  setupRegenButton();
   document.getElementById('btn-load-report').addEventListener('click', loadReport);
+  document.getElementById('btn-regen').addEventListener('click', doRegenerate);
   document.getElementById('eval-spot').addEventListener('change', () => {
     if (document.getElementById('eval-spot').value) loadReport();
   });

@@ -93,6 +93,8 @@ CASES = [
     # --- M5 智能问答（默认 APP_QA_LIVE=0：只分类+检索，不调用模型） ---
     ("/api/qa/history", 401, 2001),                          # 需登录
     ("/api/qa/ask", 405, None),                              # 提问是 POST
+    # --- 接口 19 重新生成评价：需管理员；GET 不被允许 ---
+    ("/api/spots/564/report/regenerate", 405, None),         # 重生成是 POST
 ]
 
 passed = failed = 0

@@ -49,6 +49,42 @@ def register_task(
         return int(cur.lastrowid)
 
 
+def request_task(
+    conn,
+    *,
+    task_type: str,
+    task_name: str,
+    total_count: int | None = None,
+    operator_id: int | None = None,
+) -> int:
+    """登记一个"**待执行**"任务行（status='pending'），返回 task_id。
+
+    与 `register_task` 的区别：本函数**不执行任何作业**，只记录"有人请求了这件事"。
+    用途是 Web 层的"异步提交"（如接口 19 重新生成景点评价）：
+        在线接口只登记请求 → 由离线批处理（`app/llm`）认领并真正执行。
+    这样 **Web 层永远不会自己发起模型调用**（成本边界在离线侧，可用 `--yes/--offline` 管控）。
+
+    说明：`status` 列注释给了 pending/running/success/failed/partial 五态，
+    这里用设计里已有的 `pending` 表示"已提交、待离线执行"，**未新增枚举值**。
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO analysis_task
+                (task_type, task_name, status, total_count, operator_id, created_at)
+            VALUES (%s, %s, 'pending', %s, %s, %s)
+            """,
+            (
+                task_type,
+                task_name[:128],
+                total_count,
+                operator_id,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        return int(cur.lastrowid)
+
+
 def finish_task(
     conn,
     task_id: int,
@@ -158,4 +194,4 @@ class TaskRecorder:
         self._write("INFO", "进度", f"当前处理量 {processed}", detail=detail, processed_count=processed)
 
 
-__all__ = ["chunked", "register_task", "finish_task", "TaskRecorder"]
+__all__ = ["chunked", "register_task", "request_task", "finish_task", "TaskRecorder"]
