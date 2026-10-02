@@ -281,7 +281,10 @@ def main() -> int:
     for name, ok in results:
         print(f"{PASS if ok else FAIL} {name}")
     all_ok = all(ok for _, ok in results)
-    print("\n" + (" 环境就绪，可以继续开发。" if all_ok else " 存在未通过项，请按上面的提示处理后重跑本脚本。"))
+    passed = sum(1 for _, ok in results if ok)
+    # 汇总行：供 scripts/verify_all.py 解析（与其它测试脚本统一为"x/y 项通过"写法）
+    print(f"\n环境自检：{passed}/{len(results)} 项通过")
+    print(" 环境就绪，可以继续开发。" if all_ok else " 存在未通过项，请按上面的提示处理后重跑本脚本。")
     return 0 if all_ok else 1
 
 

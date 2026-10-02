@@ -181,6 +181,10 @@
 ## 7. 如何使用
 
 ```powershell
+# ★ 一键全量验证（答辩前/提交前推荐）：环境自检 + 全部测试 + 契约 + 就绪状态汇总
+.\.venv\Scripts\python.exe scripts\verify_all.py          # 约 12 秒
+.\.venv\Scripts\python.exe scripts\verify_all.py --fast   # 跳过最慢的 verify_phase4
+
 # 启动开发服务器（读取 .env 的 FLASK_HOST / FLASK_PORT / FLASK_DEBUG）
 .\.venv\Scripts\python.exe run.py          # → http://127.0.0.1:5000/
 
@@ -202,6 +206,9 @@ curl.exe "http://127.0.0.1:5000/api/spots/564"
 curl.exe "http://127.0.0.1:5000/api/spots/564/report"
 curl.exe "http://127.0.0.1:5000/api/compare?spot_a=564&spot_b=196"
 ```
+
+> **演示还要看什么**：见 `docs/答辩演示手册.md`（演示动线、常见提问的标准回答、
+> 全量生产命令、以及"不要做的事"清单）。
 
 ## 8. 当前进度（截至阶段四）
 

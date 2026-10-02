@@ -115,8 +115,11 @@ async function loadTaskLogs(taskId) {
       <p class="hint">共 ${fmtInt(data.log_count)} 条日志，其中 ERROR ${fmtInt(data.error_count)} 条。</p>
       ${renderTable(['ID', '级别', '阶段', '内容', '关联标识', '处理量', '时间'], rows)}
       ${caliberNote(data.caliber_note, data.sample_size)}`;
+    // 日志面板在页面底部：点"日志"后自动滚过去，否则演示时看不到反应
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
     box.innerHTML = `<div class="alert bad">加载失败：${escapeHtml(e.message)}</div>`;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 

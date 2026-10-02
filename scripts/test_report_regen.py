@@ -40,20 +40,31 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
 
 
-def cleanup(spot_id: int, task_ids: list[int], user_ids: list[int]) -> tuple[int, int, int, int]:
-    """精确清理：只删本次涉及的景点结果、本次登记的任务、本次创建的用户。
+def max_task_id() -> int:
+    """当前最大 task_id（用于界定"本次新建的任务"，比时间戳更可靠）。"""
+    row = query_one("SELECT COALESCE(MAX(task_id), 0) AS m FROM analysis_task")
+    return int(row["m"])
 
-    返回 `(该景点剩余 report 行, 该景点剩余 fact_package 行, sys_user 剩余行, 删除用户的影响行数)`。
-    刻意带上"影响行数"，避免"以为删了其实没删"的静默失败。
+
+def cleanup(
+    spot_id: int, task_id_floor: int, user_ids: list[int]
+) -> tuple[int, int, int, int, int]:
+    """精确清理本次测试写入的数据。
+
+    清理依据是 **task_id_floor**（测试开始前的最大 task_id）而不是"手工收集的 id"：
+    因为 `run_fact_package()` / `run_spot_report()` 会在内部**自己登记任务**，
+    只删接口层收集到的任务 id 会漏掉它们（曾因此先后泄漏了 6 条 fact_package 任务行）。
+    凡是 `task_id > task_id_floor` 的任务，一定是本次测试产生的 → 一并删除。
+
+    返回 `(该景点剩余 report, 该景点剩余 fact_package, sys_user 剩余, 删除用户数, 删除任务数)`。
     """
     with connection() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM spot_report WHERE spot_id=%s", (spot_id,))
             cur.execute("DELETE FROM spot_fact_package WHERE spot_id=%s", (spot_id,))
-            if task_ids:
-                ph = ",".join(["%s"] * len(task_ids))
-                cur.execute(f"DELETE FROM task_log WHERE task_id IN ({ph})", tuple(task_ids))
-                cur.execute(f"DELETE FROM analysis_task WHERE task_id IN ({ph})", tuple(task_ids))
+            cur.execute("DELETE FROM task_log WHERE task_id > %s", (task_id_floor,))
+            cur.execute("DELETE FROM analysis_task WHERE task_id > %s", (task_id_floor,))
+            deleted_tasks = cur.rowcount
             deleted_users = 0
             if user_ids:
                 ph = ",".join(["%s"] * len(user_ids))
@@ -65,17 +76,24 @@ def cleanup(spot_id: int, task_ids: list[int], user_ids: list[int]) -> tuple[int
             left_pkg = int(cur.fetchone()["n"])
             cur.execute("SELECT COUNT(*) AS n FROM sys_user")
             left_users = int(cur.fetchone()["n"])
-    return left_report, left_pkg, left_users, deleted_users
+            cur.execute("SELECT COUNT(*) AS n FROM analysis_task")
+            left_tasks = int(cur.fetchone()["n"])
+    return left_report, left_pkg, left_users, deleted_users, left_tasks
 
 
 def main() -> int:
     app = create_app()
-    task_ids: list[int] = []
     admin_id: int | None = None
 
     print("=" * 84)
     print("接口 19 重新生成评价测试（在线侧零模型调用；离线侧用 MockClient）")
     print("=" * 84)
+
+    # 记录"测试开始前的最大 task_id"：本次测试产生的所有任务（含 run_fact_package /
+    # run_spot_report 内部自行登记的任务）都大于它，清理时按此界定，避免漏删。
+    task_floor = max_task_id()
+    tasks_before = query_one("SELECT COUNT(*) AS n FROM analysis_task")["n"]
+    print(f"\n测试前基线：最大 task_id={task_floor}，analysis_task 共 {tasks_before} 行")
 
     # 选一个"评论量 ≥100"的景点（合格），以及一个"<100"的景点（不合格）
     eligible = query_one(
@@ -130,9 +148,9 @@ def main() -> int:
     check("合格景点 → 202 且登记 pending 任务",
           resp.status_code == 202 and body["code"] == 0 and body["data"]["submitted"] is True,
           f"HTTP {resp.status_code} task_id={body['data'].get('task_id')}")
-    if body["data"].get("task_id"):
-        task_ids.append(int(body["data"]["task_id"]))
-        row = query_one("SELECT status, task_type FROM analysis_task WHERE task_id=%s", (task_ids[-1],))
+    api_task_id = body["data"].get("task_id")
+    if api_task_id:
+        row = query_one("SELECT status, task_type FROM analysis_task WHERE task_id=%s", (api_task_id,))
         check("任务行状态为 pending、类型为 spot_report",
               row and row["status"] == "pending" and row["task_type"] == "spot_report",
               f"status={row['status']} type={row['task_type']}")
@@ -164,15 +182,19 @@ def main() -> int:
           f"available={body['data'].get('available')}")
 
     # ---------- 清理 ----------
-    left_report, left_pkg, left_users, deleted_users = cleanup(
-        spot_id, task_ids, [u for u in (admin_id, normal.user_id) if u]
+    left_report, left_pkg, left_users, deleted_users, left_tasks = cleanup(
+        spot_id, task_floor, [u for u in (admin_id, normal.user_id) if u]
     )
     print(f"\n已清理：删除用户 {deleted_users} 个；spot_report 剩余 {left_report} 行（该景点）、"
-          f"fact_package 剩余 {left_pkg} 行、sys_user 剩余 {left_users} 行")
+          f"fact_package 剩余 {left_pkg} 行、sys_user 剩余 {left_users} 行、analysis_task 剩余 {left_tasks} 行")
     check("清理时确实删除了本次创建的用户", deleted_users == 2, f"影响行数 {deleted_users}")
     check("清理后该景点无 spot_report 残留", left_report == 0, f"剩余 {left_report}")
     check("清理后该景点无 fact_package 残留", left_pkg == 0, f"剩余 {left_pkg}")
     check("清理后无测试用户残留", left_users == 0, f"剩余 {left_users}")
+    # 这条断言是本轮补的：run_fact_package / run_spot_report 会在内部自行登记任务，
+    # 早先只删"接口层收集到的 id"导致先后泄漏了 6 条 fact_package 任务行。
+    check("清理后 analysis_task 行数回到测试前基线（无任务泄漏）",
+          left_tasks == tasks_before, f"前 {tasks_before} → 后 {left_tasks}")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
