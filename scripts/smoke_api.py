@@ -22,6 +22,7 @@ CASES = [
     ("/overview", 200, None),
     ("/spots", 200, None),
     ("/evaluation", 200, None),
+    ("/compare", 200, None),
     ("/tasks", 200, None),
     # --- 静态资源（本地 vendored，运行时不依赖外网/CDN） ---
     ("/static/vendor/echarts.min.js", 200, None),
@@ -31,6 +32,7 @@ CASES = [
     ("/static/js/overview.js", 200, None),
     ("/static/js/spots.js", 200, None),
     ("/static/js/evaluation.js", 200, None),
+    ("/static/js/compare.js", 200, None),
     ("/static/js/tasks.js", 200, None),
     ("/static/css/app.css", 200, None),
     # --- 自检接口 ---
@@ -72,7 +74,13 @@ CASES = [
     ("/api/admin/tasks/4/logs", 200, 0),
     ("/api/admin/tasks/999999999/logs", 404, 3001),
     ("/api/admin/caliber", 200, 0),
-    ("/api/compare", 404, None),          # 未实现（预期 404）
+    # --- M4 景点对比（指标由后端算；解读默认关闭，零 API 消费） ---
+    ("/api/compare?spot_a=564&spot_b=196", 200, 0),
+    ("/api/compare?spot_a=564&spot_b=564", 400, 1002),      # 同一景点
+    ("/api/compare?spot_a=564", 400, 1001),                 # 缺参数
+    ("/api/compare?spot_a=abc&spot_b=196", 400, 1001),      # 非整数
+    ("/api/compare?spot_a=564&spot_b=999999999", 404, 3001),  # 景点不存在
+    ("/api/compare?spot_a=564&spot_b=322", 200, 0),         # 样本悬殊 → 可靠性提示
     ("/api/auth/login", 404, None),       # 未实现（预期 404）
 ]
 
@@ -120,6 +128,12 @@ print(f"  主题 564: scope={topics['scope']} 主题数={len(topics['topics'])} 
 
 prov = client.get("/api/overview/provinces").get_json()["data"]
 print(f"  客源地: 省份数={prov['province_count']} 样本={prov['sample_size']} top1={prov['points'][0] if prov['points'] else None}")
+
+cmp_data = client.get("/api/compare?spot_a=564&spot_b=196").get_json()["data"]
+print(f"  对比 564 vs 196: A={cmp_data['facts']['spot_a']['spot_name']}({cmp_data['facts']['spot_a']['review_count']}) "
+      f"B={cmp_data['facts']['spot_b']['spot_name']}({cmp_data['facts']['spot_b']['review_count']}) "
+      f"样本比={cmp_data['facts']['diff']['sample_ratio']} 方面={len(cmp_data['facts']['aspects'])} "
+      f"解读可用={cmp_data['interpretation']['available']}（原因 {cmp_data['interpretation']['reason']}）")
 
 print("\n" + "=" * 80)
 print(f"接口冒烟：{passed}/{passed + failed} 通过")

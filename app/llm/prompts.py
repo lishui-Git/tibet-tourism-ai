@@ -27,6 +27,7 @@ from typing import Any, Sequence
 # Prompt 模板版本（改动模板必须同步递增）
 SEMANTIC_PROMPT_VERSION = "p1"
 REPORT_PROMPT_VERSION = "p1"
+COMPARE_PROMPT_VERSION = "p1"
 
 # 候选方面列表（设计 §15.A.2 固定 10 类；`aspect.aspect_name` 为 VARCHAR(32)，长度安全）
 ASPECT_CANDIDATES: tuple[str, ...] = (
@@ -149,7 +150,44 @@ def build_report_messages(package_json: dict[str, Any]) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# 三、通用工具
+# 三、M4 景点对比解读 Prompt（设计 §15.D）
+# ---------------------------------------------------------------------------
+
+COMPARE_SYSTEM_PROMPT = """你是旅游景点评论数据的对比解读助手。你只能使用"对比事实"中给出的数据作答。
+【硬性约束】
+1. 不得使用你自身的知识补充任何事实。
+2. 引用数字必须与对比事实完全一致，不得四舍五入后改变量级。
+3. **必须先陈述两个景点的指标差异，再解释可能的原因**，不得颠倒顺序。
+4. **禁止判定"哪个更好"或给出推荐结论**，只能说明数据差异。
+5. 两个景点样本量相差悬殊时（对比事实中的 reliability_warning 非空），必须提及可靠性影响。
+6. 对比事实中未涉及的方面不要提及。
+7. 只输出 JSON，不要输出任何解释性前后缀。"""
+
+COMPARE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "differences": ["指标差异陈述，2-5 条，每条 ≤50 字"],
+    "possible_reasons": ["对差异的可能解释，1-4 条，每条 ≤50 字"],
+    "reliability_note": "样本可靠性说明（若样本量相差悬殊则必须写明；否则可为空字符串）",
+}
+
+
+def build_compare_messages(compare_facts: dict[str, Any]) -> list[dict[str, str]]:
+    """组装景点对比解读的 messages（system + 对比事实 JSON + 输出 Schema）。
+
+    对比事实由**后端计算**（差值、比率、样本量比），模型只负责用语言陈述与解释（§15.D.3）。
+    """
+    user = (
+        "对比事实：\n"
+        + json.dumps(compare_facts, ensure_ascii=False, indent=2)
+        + f"\n\n[输出 Schema]\n{json.dumps(COMPARE_OUTPUT_SCHEMA, ensure_ascii=False, indent=2)}"
+    )
+    return [
+        {"role": "system", "content": COMPARE_SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 四、通用工具
 # ---------------------------------------------------------------------------
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
@@ -180,15 +218,19 @@ def format_aspect_candidates() -> str:
 __all__ = [
     "SEMANTIC_PROMPT_VERSION",
     "REPORT_PROMPT_VERSION",
+    "COMPARE_PROMPT_VERSION",
     "ASPECT_CANDIDATES",
     "POLARITIES",
     "SEMANTIC_SYSTEM_PROMPT",
     "SEMANTIC_OUTPUT_SCHEMA",
     "REPORT_SYSTEM_PROMPT",
     "REPORT_OUTPUT_SCHEMA",
+    "COMPARE_SYSTEM_PROMPT",
+    "COMPARE_OUTPUT_SCHEMA",
     "build_semantic_messages",
     "build_semantic_repair_messages",
     "build_report_messages",
+    "build_compare_messages",
     "extract_json_text",
     "format_aspect_candidates",
 ]

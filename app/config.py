@@ -208,6 +208,10 @@ class WebSettings:
     host: str = _get_app("FLASK_HOST", "127.0.0.1")
     port: int = _get_app_int("FLASK_PORT", 5000)
     debug: bool = _get_app_bool("FLASK_DEBUG", True)
+    # 景点对比解读（M4）是否允许**在线**调用模型。
+    # 默认关闭：对比的指标与方面由后端计算（不落库、零成本），只有解读需要模型。
+    # 设计 §15.D 允许在线生成；本开关把它变成"显式开启"的能力，避免误消费。
+    compare_live: bool = _get_app_bool("COMPARE_LIVE", False)
 
 
 @dataclass(frozen=True)

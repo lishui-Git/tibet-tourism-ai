@@ -9,10 +9,11 @@
     `/overview`    M1 数据总览
     `/spots`       M2 景点分析
     `/evaluation`  M3 景点智能评价
+    `/compare`     M4 景点对比（指标由后端算；解读默认关闭，零 API 消费）
     `/tasks`       M6 系统管理（任务与口径）
 
-未实现的页面：M4 景点对比、M5 智能问答 —— 它们依赖**在线**模型调用，
-需先设计好在线调用的缓存/限额/降级策略再落地（见 `app/web/README.md` §4）。
+未实现的页面：M5 智能问答 —— 它必须在请求时调用模型（依赖用户当次提问），
+需先设计好限额、缓存与降级策略再落地（见 `app/web/README.md` §4）。
 """
 
 from __future__ import annotations
@@ -44,6 +45,12 @@ def spots_page():
 def evaluation_page():
     """M3 景点智能评价页。"""
     return render_template("evaluation.html")
+
+
+@bp.get("/compare")
+def compare_page():
+    """M4 景点对比页。"""
+    return render_template("compare.html")
 
 
 @bp.get("/tasks")

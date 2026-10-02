@@ -106,6 +106,19 @@ CONTRACTS: dict[str, list[str]] = {
     "/api/admin/caliber": [
         "calibers", "caliber_note", "sample_size", "calibers[0].key", "calibers[0].note",
     ],
+    "/api/compare?spot_a=564&spot_b=196": [
+        "facts.spot_a.id", "facts.spot_a.spot_name", "facts.spot_a.review_count",
+        "facts.spot_a.avg_score", "facts.spot_a.sentiment.method",
+        "facts.spot_a.sentiment.sample_size", "facts.spot_a.sentiment.positive",
+        "facts.spot_b.id", "facts.spot_b.spot_name", "facts.spot_b.review_count",
+        "facts.diff.review_count_delta", "facts.diff.avg_score_delta",
+        "facts.diff.sample_ratio", "facts.diff.reliability_warning",
+        "facts.aspects", "facts.caliber.aspect_min_sample", "facts.caliber.ip_valid_since",
+        "indicator_compare", "indicator_compare[0].label", "indicator_compare[0].spot_a",
+        "indicator_compare[0].spot_b", "indicator_compare[0].delta",
+        "interpretation.available", "interpretation.reason", "interpretation.message_text",
+        "interpretation.reliability_note", "caliber_note", "sample_size.spot_a", "sample_size.spot_b",
+    ],
 }
 
 

@@ -50,13 +50,15 @@ def create_app() -> Flask:
 
     app.register_blueprint(pages_bp)
 
-    # 注册蓝图：业务只读接口（M1 数据总览 / M2 景点分析 / M3 智能评价 / M6 系统管理）
+    # 注册蓝图：业务只读接口（M1 数据总览 / M2 景点分析 / M3 智能评价 / M4 对比 / M6 系统管理）
     from app.web.routes.admin import bp as admin_bp
+    from app.web.routes.compare import bp as compare_bp
     from app.web.routes.overview import bp as overview_bp
     from app.web.routes.spots import bp as spots_bp
 
     app.register_blueprint(overview_bp)
     app.register_blueprint(spots_bp)
+    app.register_blueprint(compare_bp)
     app.register_blueprint(admin_bp)
 
     return app

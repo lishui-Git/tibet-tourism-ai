@@ -457,15 +457,102 @@ def _collect_package_numbers(package: dict[str, Any]) -> tuple[list[float], list
     return percent_values, plain_values
 
 
+# ---------------------------------------------------------------------------
+# 五、M4 景点对比解读的校验（设计 §15.D.3）
+# ---------------------------------------------------------------------------
+
+COMPARE_ITEM_MAX_CHARS = 50
+COMPARE_DIFF_MIN, COMPARE_DIFF_MAX = 2, 5
+COMPARE_REASON_MIN, COMPARE_REASON_MAX = 1, 4
+
+# "判定优劣"的违禁表述：设计明确要求"禁止判定哪个更好"（BR-07）
+_VERDICT_WORDS = (
+    "更好", "更值得", "更胜一筹", "优于", "强于", "不如", "推荐去", "首选", "建议选择",
+    "哪个好", "胜过", "碾压",
+)
+
+
+@dataclass
+class CompareResult:
+    """一次景点对比解读的校验结果。"""
+
+    differences: list[str] = field(default_factory=list)
+    possible_reasons: list[str] = field(default_factory=list)
+    reliability_note: str = ""
+    verdict_detected: list[str] = field(default_factory=list)   # 命中的违禁判定词
+    repairs: list[str] = field(default_factory=list)
+    raw_text: str = ""
+
+    @property
+    def has_verdict(self) -> bool:
+        return bool(self.verdict_detected)
+
+
+def validate_compare(raw_text: str) -> CompareResult:
+    """校验对比解读：结构与条数（§15.D.2）+ 违禁判定词检测。
+
+    :raises ValidationError: JSON 结构不可用
+    """
+    import json
+
+    try:
+        data = json.loads(raw_text)
+    except ValueError as exc:
+        raise ValidationError(f"JSON 解析失败：{exc}") from exc
+    if not isinstance(data, dict):
+        raise ValidationError("顶层结构不是 JSON 对象")
+
+    repairs: list[str] = []
+
+    def pick_items(key: str, low: int, high: int) -> list[str]:
+        raw_items = data.get(key)
+        items: list[str] = []
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                text = _truncate(str(item or ""), COMPARE_ITEM_MAX_CHARS)
+                if text:
+                    items.append(text)
+        if len(items) > high:
+            repairs.append(f"{key} 超量截断 {len(items)} → {high} 条")
+            items = items[:high]
+        if len(items) < low:
+            repairs.append(f"{key} 仅 {len(items)} 条（少于 {low} 条，按实际保留）")
+        return items
+
+    differences = pick_items("differences", COMPARE_DIFF_MIN, COMPARE_DIFF_MAX)
+    reasons = pick_items("possible_reasons", COMPARE_REASON_MIN, COMPARE_REASON_MAX)
+    if not differences:
+        raise ValidationError("differences 缺失或为空（必须先陈述指标差异）")
+
+    note = _truncate(str(data.get("reliability_note") or ""), 120)
+
+    text = " ".join(differences + reasons + [note])
+    hits = [word for word in _VERDICT_WORDS if word in text]
+    if hits:
+        repairs.append("检出疑似『判定优劣』表述：" + "、".join(hits) + "（设计禁止）")
+
+    return CompareResult(
+        differences=differences,
+        possible_reasons=reasons,
+        reliability_note=note,
+        verdict_detected=hits,
+        repairs=repairs,
+        raw_text=raw_text,
+    )
+
+
 __all__ = [
     "ValidationError",
     "SemanticResult",
     "ReportResult",
+    "CompareResult",
     "validate_semantic",
     "rule_based_semantic",
     "validate_report",
+    "validate_compare",
     "check_number_consistency",
     "INTENSITY_MIN",
     "INTENSITY_MAX",
     "NUMBER_TOLERANCE_PP",
+    "COMPARE_ITEM_MAX_CHARS",
 ]
