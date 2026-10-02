@@ -49,6 +49,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_fact_package.py", "事实包（C-BAT-06 零模型调用 + 幂等跳过 + 清理回基线）", False),
     ("test_spot_report_write_failure.py", "景点评价写库失败兜底（注入写库失败 → 批次继续 + 落盘待补）", False),
     ("test_layering.py", "分层自洽性（三层互斥穷尽 + 待处理口径吻合，证明无评论被静默跳过）", False),
+    ("test_cli_guards.py", "运行安全闸门（规模确认 / mock 上限 / 离线阻断 / 客户端构造）", False),
     ("check_api_contract.py", "接口字段契约（前端依赖的字段确实存在）", False),
     ("verify_phase4.py", "阶段四端到端验证（34 项检查，含快照对比与清理）", True),
 )

@@ -209,15 +209,35 @@ def _guard_offline(args: argparse.Namespace) -> None:
 
     这道闸门与 `_build_client` 里的阻断是**双重保险**：
     即使将来有人改了客户端构造逻辑，这里也会先拦住。
+
+    **为什么允许 `--mock` 通过**：mock 用假客户端，根本不会发起请求；
+    而 `--mock` 受 `_guard_mock` 的 `--limit ≤ 50` 约束，所以放行它是安全的，
+    也方便在离线状态下做链路联调。
+
+    **为什么 `--only-ids` 不能放行**：`--only-ids` 是**定向真实补跑**，
+    它绕过规模闸门（这是设计意图——失败项要能单独重试），但正因为它绕过规模闸门，
+    就更不能同时绕过离线闸门；否则 `--offline --only-ids` 会变成
+    "既跳过费用确认、又允许真实调用"的组合。因此这里保持拒绝。
     """
     offline = args.offline or os.environ.get("APP_LLM_OFFLINE", "").strip() in {"1", "true", "yes", "on"}
     if not offline:
         return
     if args.mock or args.dry_run or args.stage in {"check", "preflight"}:
         return
+    # 提示要能直接照着做：很多人会在真实跑之前顺手加 --offline"以防万一"，
+    # 结果被这道闸门拦住却不知道下一步该怎么做（实测踩到过），因此把替代做法写清楚。
+    hint = ""
+    if args.only_ids or args.spot_ids:
+        hint = (
+            "\n  你用了 --only-ids/--spot-ids（定向补跑，会真实调用）。"
+            "\n  · 想先看看会调用多少条：去掉 --offline 后加 --dry-run（零调用）"
+            "\n  · 想在离线状态下演练链路：加 --mock --limit N（N ≤ 50，假客户端）"
+            "\n  · 确实要补跑这几条：去掉 --offline（单条约 ¥0.002，无需 --yes）"
+        )
     raise SystemExit(
         f"[已阻断] 离线模式下不允许执行 --stage {args.stage} 的真实调用。\n"
         "  允许的组合：--stage preflight / --stage check / --dry-run / --mock。"
+        + hint
     )
 
 

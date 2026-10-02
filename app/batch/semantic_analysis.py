@@ -272,7 +272,12 @@ def build_rule_record(row: dict) -> dict[str, Any]:
     }
 
 
-def _build_api_record(row: dict, result: SemanticResult, usage: dict[str, int] | None = None) -> dict[str, Any]:
+def _build_api_record(
+    row: dict,
+    result: SemanticResult,
+    usage: dict[str, int] | None = None,
+    mode: str = "real",
+) -> dict[str, Any]:
     """把一次成功的模型调用结果整理成待写库记录。
 
     注意旧版本兼容：`validate_semantic` 现在返回结构化对象，`result` 也可能是
@@ -280,12 +285,19 @@ def _build_api_record(row: dict, result: SemanticResult, usage: dict[str, int] |
 
     `usage` 一并写入 `raw_json`：否则"本次真实花了多少 token"只存在于进程内存里，
     事后无法仅凭数据库复核费用（论文的实验成本章节需要这个依据）。
+
+    `mode` 标注**这次结果是真实调用还是 mock 生成的**，写进 `raw_json.mode`。
+    为什么必须标：`MockClient` 产出的假结果在数据库里与真实结果**长得一模一样**
+    （同样的 `source='deepseek'`、同样的字段，甚至带假 token 数），
+    一旦混入真实结果表，事后无法区分，会直接污染"真实 API 完成数"这个口径
+    （实测踩到过：一次 `--mock` 试跑把待处理评论写成了看似真实的第 32 条）。
     """
     if isinstance(result, tuple):
         result, _ = result
     raw = {
         "source": "deepseek",
         "prompt_version": SEMANTIC_PROMPT_VERSION,
+        "mode": mode,
         **result.as_raw_json(),
     }
     if usage:
@@ -333,9 +345,12 @@ def call_batch(
     rows: Sequence[dict],
     concurrency: int,
     stats: CallStats,
+    mode: str = "real",
 ) -> tuple[list[dict[str, Any]], list[tuple[dict, str, str]]]:
     """并发处理一批评论。
 
+    :param mode: `"real"` 或 `"mock"`，写入 `raw_json.mode` 以便事后区分
+                 （mock 的假结果与真实结果在库里长得一样，必须自带标记）。
     :returns: `(成功记录列表, 失败列表[(行, 失败类别, 失败原因)])`
     **单条失败绝不影响整批**（§7.5）——所有异常都被收敛成失败项。
     """
@@ -380,7 +395,7 @@ def call_batch(
                 continue
             if response is not None:
                 stats.record_success(response)
-            records.append(_build_api_record(row, result, response.usage if response else None))
+            records.append(_build_api_record(row, result, response.usage if response else None, mode=mode))
     return records, failures
 
 
@@ -743,7 +758,9 @@ def run_semantic_analysis(
         pending = list(plan.call_rows)
         for index in range(0, len(pending), CALL_BATCH):
             batch_rows = pending[index : index + CALL_BATCH]
-            records, batch_failures = call_batch(client, batch_rows, concurrency, call_stats)
+            records, batch_failures = call_batch(
+                client, batch_rows, concurrency, call_stats, mode="mock" if mock else "real"
+            )
             failures.extend(batch_failures)
             stats.api_success += len(records)
             stats.api_failed += len(batch_failures)

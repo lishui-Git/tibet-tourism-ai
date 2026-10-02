@@ -180,6 +180,11 @@ INTEGRITY_SQL = {
     "semantic_without_sentiment": "SELECT COUNT(*) FROM comment_semantic cs "
                                   "LEFT JOIN sentiment se ON se.comment_id = cs.comment_id AND se.method='deepseek' "
                                   "WHERE se.comment_id IS NULL",
+    # mock 标记行（`raw_json.mode='mock'`）：mock 假结果与真实结果在库里长得一样，
+    # 混进结果表会直接污染"真实 API 完成数"与费用核算，必须能被检出（正常应为 0）。
+    # 说明：31 条真实结果写入时还没有该字段，因此它们读作"无标记"（即真实），这是正确的。
+    "mock_rows_in_results": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
+                            "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode')) = 'mock'",
 }
 
 # 「分层自洽性」检查（只读）：证明 59,033 条评论被三层**恰好覆盖一次**，没有静默丢弃。
@@ -356,6 +361,13 @@ def collect() -> Preflight:
     # 事实包 / 评价必须先有评论级语义结果，否则会生成"无证据"的评价
     if result.counts["fact_package_done"] and not result.counts["deepseek_done"]:
         issues.append("存在事实包但没有任何 DeepSeek 语义结果：事实包缺少证据来源")
+
+    # mock 结果混入真实结果表：会污染"真实 API 完成数"口径与费用核算，必须阻断
+    if result.integrity.get("mock_rows_in_results"):
+        issues.append(
+            f"结果表中存在 {result.integrity['mock_rows_in_results']} 条 mock 假结果"
+            "（raw_json.mode='mock'）：会污染真实调用数与费用核算，必须清除后再全量运行"
+        )
 
     # ---- 分层自洽性：三层是否**恰好覆盖**全部可分析评论（不重不漏）----------
     layer = result.layering

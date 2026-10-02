@@ -273,7 +273,6 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 4. 明确指定"全量"并带 `--yes`（默认不跑全量，避免误触发 4.7 万次调用）。
 
 ### 9.1 离线模式（开发/演示期的零消费保证）
-
 ```powershell
 # 任何真实调用都被硬阻断；只允许 preflight / check / --dry-run / --mock
 .\.venv\Scripts\python.exe -m app.llm --stage semantic --yes --offline
@@ -287,6 +286,19 @@ $env:APP_LLM_OFFLINE = "1"   # 也可以用环境变量全局生效
 
 > `--mock` 使用假客户端，结果会在 `analysis_task.task_name` 中标注 `[mock]`，
 > **论文与答辩中不得引用 mock 结果**。
+>
+> ⚠️ **`--mock` 会真实写库，而且假结果在结果表里和真结果几乎一样**（实测教训）：
+> `MockClient` 产出的结果同样以 `source='deepseek'`、同样的字段写进
+> `sentiment` / `comment_semantic` / `aspect`，甚至带一份**假 token 数**；
+> 因此一次 `--mock --limit 1` 的试跑就会把一条待处理评论变成"看似真实的第 32 条结果"，
+> 直接污染"真实 API 完成数"与费用核算。
+> 为此做了两件事：
+> 1. **`raw_json.mode` 标记**：mock 写入时记为 `"mock"`，真实调用记为 `"real"`
+>    （31 条历史真实结果没有该字段，读作真实，符合事实）；
+> 2. **preflight 会检出并阻断**：`mock_rows_in_results > 0` 时 `STATUS: BLOCKED`，
+>    提示"必须清除后再全量运行"。
+> 建议：**不要在正式库上跑会写库的 mock**；要联调就用 `--dry-run`（零写入），
+> 或用测试脚本里的 `MockClient`（它们自带快照与清理）。
 >
 > **`--limit` 的作用范围**：它限制的是"需要调用模型"的条数。真实运行时规则层（≤10 字）与复用层
 > 不受限制——它们不产生 API 费用；`--mock` 联调时三层都会按 `--limit` 收窄，
@@ -307,6 +319,7 @@ $env:APP_LLM_OFFLINE = "1"   # 也可以用环境变量全局生效
 | 9 | `sentiment.raw_json` 的内容 | 只写"模型原始返回" | 同时写 `model_raw`（原始文本）、`usage`（token 用量）、`dropped_aspects`（被拦下的方面及原因）、`prompt_version` | 只留校验后的结果将无法事后判断"模型当时编了什么、花了多少 token"，与"便于复核与复现"的字段注释相矛盾 |
 | 10 | 事务与断点粒度 | `db.py` 注释为"按批 commit，便于断点续跑" | **实现原先只在正常退出时提交一次**（本轮修正为逐批/逐景点提交） | 注释描述的是设计意图，但代码没做到；不改会导致中途异常把当轮已付费结果整批回滚 |
 | 11 | 分层计数口径 | 设计未定义"分层覆盖"检查 | 新增 preflight `[2b]`：三层必须互斥穷尽、且"待处理 = 总量 − 已完成" | 写这组校验时**当场抓出两处口径错误**：① 首版把"既低信息量又是重复组成员"的 2,583 条重复计入两层；② 调用层"已完成"误数了结果表全表（含复制来的行），导致 pending 对不上。两者都会让 preflight **少算工作量**、跑完仍留没结果的评论 |
+| 12 | mock 结果的可辨识性 | 设计未涉及 | `raw_json.mode` 标注 `real`/`mock`，且 preflight 检出 mock 行即阻断 | mock 假结果与真实结果在库里几乎一致（含假 token 数），一次 `--mock` 试跑就会污染真实完成数；不标记就无法事后区分 |
 
 ## 11. 答辩时重点理解
 
