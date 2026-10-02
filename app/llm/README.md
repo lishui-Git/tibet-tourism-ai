@@ -445,6 +445,20 @@ $env:APP_LLM_OFFLINE = "1"   # 也可以用环境变量全局生效
 > 一旦被覆盖就再也认不出来。实测踩到过：11 条 mock 行 + **4 条复用行**一起残留在结果表里，
 > 其中复用行因无标记而**与真实结果无法区分**。现在两者都写进 `raw_json.mode`，
 > 可被一条 SQL 精确定位与清理。
+
+### 7.4 `spot_report` 的 mock 行也要查（它没有 raw_json）
+
+`sentiment` 的 mock 检出靠 `raw_json.mode='mock'`，但**景点评价表没有 `raw_json`**，
+因此那条检查**覆盖不到它**。而 mock 模式写入的评价会把 `spot_report.model` 记为 `'mock'`
+（见 `app/batch/spot_report.py`）：
+
+```sql
+SELECT COUNT(*) FROM spot_report WHERE model = 'mock'   -- 正常应为 0
+```
+
+> 为什么必须单独查：一条 mock 评价在库里与真实评价**完全一样**（同样的四段文案与字段）。
+> 若全量运行前残留一条，那个景点会因"**已有评价**"被游标跳过而**永不重新生成**，
+> 最终库里就混着一条假评价。preflight 现在对此 `STATUS: BLOCKED`。
 >
 > **`--limit` 的作用范围**：它限制的是"需要调用模型"的条数。真实运行时规则层（≤10 字）与复用层
 > 不受限制——它们不产生 API 费用；`--mock` 联调时三层都会按 `--limit` 收窄，

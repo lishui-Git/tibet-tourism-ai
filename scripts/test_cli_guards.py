@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """运行安全闸门测试（preflight / --mock / --offline / 规模确认）。
 
 ## 为什么单独测"闸门"
@@ -129,6 +129,27 @@ def main() -> int:
     check("mock 结果写入 mode='mock'", mock_raw.get("mode") == "mock", str(mock_raw.get("mode")))
     check("默认为真实调用 mode='real'", real_raw.get("mode") == "real", str(real_raw.get("mode")))
     check("mock 与真实结果在 raw_json 上可区分", mock_raw.get("mode") != real_raw.get("mode"), "")
+
+    # ---------- F2. 复用行标记 + preflight 的 mock 检出覆盖面 ----------
+    print("\n[F2] 复用行可辨识 + preflight 必须同时查 sentiment 与 spot_report 的 mock 行")
+    from app.batch.semantic_analysis import _build_reuse_raw
+    from app.llm.preflight import INTEGRITY_SQL
+
+    reuse_raw = _build_reuse_raw(12345)
+    check("复用行写入 mode='reuse'（防止 source 被重跑覆盖后无法辨识）",
+          reuse_raw.get("mode") == "reuse", str(reuse_raw.get("mode")))
+    check("复用行仍保留 reused_from_comment_id（可追溯来源）",
+          reuse_raw.get("reused_from_comment_id") == 12345, "")
+    check("复用行 usage 记为 0（成本核算可区分『免费复用』与『已付费调用』）",
+          (reuse_raw.get("usage") or {}).get("total_tokens") == 0, str(reuse_raw.get("usage")))
+
+    check("preflight 检查 sentiment 的 mock 行", "mock_rows_in_results" in INTEGRITY_SQL, "")
+    check("preflight 也检查 spot_report 的 mock 评价（该表无 raw_json，须按 model 查）",
+          "spot_report" in INTEGRITY_SQL.get("mock_spot_report_rows", "")
+          and "model = 'mock'" in INTEGRITY_SQL["mock_spot_report_rows"], "")
+    check("可见指标 test_trace_rows_in_results 覆盖 mock 与 reuse 两种标记",
+          "mock" in INTEGRITY_SQL.get("test_trace_rows_in_results", "")
+          and "reuse" in INTEGRITY_SQL.get("test_trace_rows_in_results", ""), "")
 
     # ---------- G. 不相关选项必须被提示（而不是静默忽略） ----------
     print("\n[G] 阶段不相关的选项要明确提示（避免生产时误判为『参数坏了』）")

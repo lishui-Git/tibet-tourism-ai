@@ -193,6 +193,11 @@ INTEGRITY_SQL = {
     # 它不参与"真实 API 完成数"口径，仅作为"库内有无测试残留/复用副本"的可见指标。
     "test_trace_rows_in_results": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
                                   "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode')) IN ('mock','reuse')",
+    # 景点评价里的 mock 行：`spot_report.model` 在 mock 模式下写 'mock'（见 spot_report.py）。
+    # 为什么必须单独查：景点评价表**没有** raw_json，sentiment 的那条检查覆盖不到它；
+    # 而一条 mock 评价在库里与真实评价**完全一样**（同样的四段文案与字段），
+    # 全量后若残留，会因"已有评价"被游标跳过而**永不重生成**。
+    "mock_spot_report_rows": "SELECT COUNT(*) FROM spot_report WHERE model = 'mock'",
 }
 
 # 「分层自洽性」检查（只读）：证明 59,033 条评论被三层**恰好覆盖一次**，没有静默丢弃。
@@ -383,6 +388,14 @@ def collect() -> Preflight:
         issues.append(
             f"结果表中存在 {result.integrity['mock_rows_in_results']} 条 mock 假结果"
             "（raw_json.mode='mock'）：会污染真实调用数与费用核算，必须清除后再全量运行"
+        )
+
+    # 景点评价表里的 mock 行：sentiment 的那条检查覆盖不到它（该表没有 raw_json）。
+    # 一条 mock 评价在库里与真实评价完全一样，全量后会因"已有评价"而被跳过、永不重生成。
+    if result.integrity.get("mock_spot_report_rows"):
+        issues.append(
+            f"spot_report 中存在 {result.integrity['mock_spot_report_rows']} 条 mock 评价"
+            "（model='mock'）：全量运行会因『已有评价』而跳过这些景点，必须清除后再全量运行"
         )
 
     # ---- 分层自洽性：三层是否**恰好覆盖**全部可分析评论（不重不漏）----------
