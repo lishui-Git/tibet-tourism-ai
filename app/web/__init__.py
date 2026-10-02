@@ -4,14 +4,21 @@
 本包承载 C4 组件 `C-API-01` ~ `C-API-14`，采用应用工厂模式（create_app），
 便于后续按模块拆分路由蓝图、也便于自检脚本在不启动服务器的情况下获取 app 对象。
 
-当前进度（截至阶段四）：
-    GET /                    → 骨架首页（证明模板与静态资源可加载）
-    GET /healthz             → 进程存活（不查库）
-    GET /api/db-ping         → MySQL 连通性 + 已建表数量（查库）
+当前进度（截至阶段四 + 只读业务层）：
+    页面：GET /                → 骨架首页（证明模板与静态资源可加载）
+    自检：GET /healthz         → 进程存活（不查库）
+          GET /api/db-ping     → MySQL 连通性 + 已建表数量（查库）
 
-详细设计 §6.2 的 26 个业务接口与 5 个业务页面尚未实现——
-它们的**数据来源已经就绪**（阶段三 Spark 全量统计 + 阶段四 DeepSeek 语义结果），
-下一阶段按"只读数据库、不在线调用模型"的原则落地。
+    业务（**只读**，数据来自已落库的离线分析结果）：
+      M1 数据总览  GET /api/overview/summary | /trend | /distribution | /provinces | /data-note
+      M2 景点分析  GET /api/spots | /spots/ranking | /spots/{id} | /trend | /sentiment
+                       | /aspects | /topics | /reviews
+      M3 智能评价  GET /api/spots/{id}/report
+      M6 系统管理  GET /api/admin/tasks | /tasks/{id}/logs | /caliber
+
+【架构原则】详细设计 §6.2 的其余接口（认证 4 个、对比 1 个、问答 2 个、
+重新生成评价 1 个、用户列表 1 个）尚未实现，因为它们依赖用户体系或需要在线模型调用；
+在实现前不注册路由，避免出现"有接口无实现"或"有权限校验但形同虚设"的情况。
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ def create_app() -> Flask:
     app.json.ensure_ascii = False
     app.config["JSON_AS_ASCII"] = False
 
-    # 注册蓝图（阶段一仅自检类接口）
+    # 注册蓝图：自检 + 页面
     from app.web.routes.health import bp as health_bp
 
     app.register_blueprint(health_bp)
@@ -42,6 +49,15 @@ def create_app() -> Flask:
     from app.web.routes.pages import bp as pages_bp
 
     app.register_blueprint(pages_bp)
+
+    # 注册蓝图：业务只读接口（M1 数据总览 / M2 景点分析 / M3 智能评价 / M6 系统管理）
+    from app.web.routes.admin import bp as admin_bp
+    from app.web.routes.overview import bp as overview_bp
+    from app.web.routes.spots import bp as spots_bp
+
+    app.register_blueprint(overview_bp)
+    app.register_blueprint(spots_bp)
+    app.register_blueprint(admin_bp)
 
     return app
 
