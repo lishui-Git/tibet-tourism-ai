@@ -29,6 +29,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 DOC = ROOT / "docs" / "答辩演示手册.md"
+INDEX = ROOT / "开发上下文索引.md"
+
+# 「明确未做的事」里已被划掉的条目（`~~...~~`）不该再被读成"还没做"。
+# 本清单是**人工确认过已完成**的功能，用于防止索引里出现自相矛盾的过期声明。
+INDEX_MUST_NOT_CLAIM_MISSING = (
+    "26 个接口）未实现",
+    "5 个业务页面未做",
+)
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -145,6 +153,42 @@ def check_routes(doc: str) -> None:
     check("手册写明了接口/页面规模", "27 个 API 路由" in doc and "9 个页面" in doc, "")
 
 
+def check_index_freshness() -> None:
+    """`开发上下文索引.md` 不得再声称"接口/页面未实现"，且成本口径必须与预检一致。
+
+    为什么单独查它：这份索引是**给未来（或换人接手时）快速了解进度**用的。
+    实测发现它一度仍写着"26 个接口未实现，目前只有 2 个自检口""5 个业务页面未做"，
+    还留着 `32 行`/`63 行`/`10,260` 等旧数字与 `¥60–73` 这个与预检冲突的成本区间——
+    这类**过期声明比没有文档更危险**：读者会据此误判进度。
+    """
+    if not INDEX.exists():
+        check("开发上下文索引.md 存在", False, str(INDEX))
+        return
+    text = io.open(INDEX, encoding="utf-8").read()
+
+    for phrase in INDEX_MUST_NOT_CLAIM_MISSING:
+        # 允许"划掉式"记录（~~旧说法~~ → 已完成），只要不在正文里当成现状陈述
+        offending = [
+            line for line in text.splitlines()
+            if phrase in line and not line.strip().startswith("- ~~")
+        ]
+        check(f"索引不再声称『{phrase}』为未完成",
+              not offending, offending[0].strip()[:70] if offending else "")
+
+    # 成本口径：索引里不该再出现与预检冲突的旧区间
+    for stale in ("¥60–73", "¥60-73", "75.05", "97.67"):
+        check(f"索引不含过期成本数字『{stale}』", stale not in text, "")
+
+    # 索引应与预检一致地写出当前口径
+    from app.llm.preflight import collect
+
+    pf = collect()
+    total_min = pf.cost["total_cost_min_cny"]
+    total_max = pf.cost["total_cost_max_cny"]
+    check(f"索引写出的全量成本与预检一致（¥{total_min}–{total_max}）",
+          f"{total_min}" in text and f"{total_max}" in text, "")
+
+
 def main() -> int:
     print("=" * 88)
     print("文档事实核对：手册里的命令与基线数字必须与系统一致（零 API 消费）")
@@ -159,6 +203,9 @@ def main() -> int:
 
     print("\n[3] 接口与页面路由规模")
     check_routes(doc)
+
+    print("\n[4] 开发上下文索引 不得含过期声明")
+    check_index_freshness()
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
