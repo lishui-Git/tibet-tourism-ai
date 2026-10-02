@@ -100,6 +100,25 @@ def main() -> int:
           f"{pf.workload['fact_package_api_calls']}")
     check("字段名可自解释（含 fact_package_api_calls）", "fact_package_api_calls" in msgs, msgs)
 
+    # ---------- D. 打印出来的"分项相加 = 合计"必须真的加得起来 ----------
+    print("\n[D] 预检打印的『分项 + 分项 = 合计』必须真能加得起来")
+    c = pf.cost
+    check("评论级下限 + 景点级 = 合计下限（按打印值核对）",
+          round(c["comment_cost_min_cny"] + c["spot_report_cost_cny"], 2) == c["total_cost_min_cny"],
+          f"{c['comment_cost_min_cny']} + {c['spot_report_cost_cny']} = "
+          f"{round(c['comment_cost_min_cny'] + c['spot_report_cost_cny'], 2)} "
+          f"vs 合计 {c['total_cost_min_cny']}")
+    check("评论级上限 + 景点级 = 合计上限（按打印值核对）",
+          round(c["comment_cost_max_cny"] + c["spot_report_cost_cny"], 2) == c["total_cost_max_cny"],
+          f"{c['comment_cost_max_cny']} + {c['spot_report_cost_cny']} = "
+          f"{round(c['comment_cost_max_cny'] + c['spot_report_cost_cny'], 2)} "
+          f"vs 合计 {c['total_cost_max_cny']}")
+    check("调用量也自洽：评论级 + 景点级 = 总调用量",
+          pf.workload["comment_api_calls"] + pf.workload["spot_report_api_calls"]
+          == pf.workload["total_api_calls"],
+          f"{pf.workload['comment_api_calls']} + {pf.workload['spot_report_api_calls']} "
+          f"= {pf.workload['total_api_calls']}")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
     print("\n" + "=" * 86)

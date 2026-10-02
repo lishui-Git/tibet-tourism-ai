@@ -319,13 +319,21 @@ def collect() -> Preflight:
         "fact_package_api_calls": 0,          # C-BAT-06 纯 SQL，零调用
         "total_api_calls": call_pending + report_pending,
     }
+    # 费用：先算并**四舍五入到分**各分项，再由分项相加得到合计。
+    # 为什么要这样：报告里会打印"评论级 ¥A + 景点级 ¥B = 合计 ¥C"，
+    # 若合计用**未舍入**的中间值再舍入，会出现 A+B ≠ C 的观感
+    # （实测：74.43 + 0.63 = 75.06，而合计显示 75.05）——
+    # 答辩时被人当场按计算器质疑"加不起来"是完全可以避免的。
+    comment_min = round(estimate_cost(call_pending, tokens_min), 2)
+    comment_max = round(estimate_cost(call_pending, tokens_max), 2)
+    report_cost_rounded = round(report_cost, 2)
     result.cost = {
         "tokens_per_call_measured": tokens_mid,
-        "comment_cost_min_cny": round(estimate_cost(call_pending, tokens_min), 2),
-        "comment_cost_max_cny": round(estimate_cost(call_pending, tokens_max), 2),
-        "spot_report_cost_cny": round(report_cost, 2),
-        "total_cost_min_cny": round(estimate_cost(call_pending, tokens_min) + report_cost, 2),
-        "total_cost_max_cny": round(estimate_cost(call_pending, tokens_max) + report_cost, 2),
+        "comment_cost_min_cny": comment_min,
+        "comment_cost_max_cny": comment_max,
+        "spot_report_cost_cny": report_cost_rounded,
+        "total_cost_min_cny": round(comment_min + report_cost_rounded, 2),
+        "total_cost_max_cny": round(comment_max + report_cost_rounded, 2),
     }
 
     result.integrity = {key: _scalar(sql) for key, sql in INTEGRITY_SQL.items()}
