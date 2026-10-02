@@ -141,6 +141,20 @@ def main() -> int:
           "这正是『余额不足、不能全量』的判断依据",
           57 < pf.cost["total_cost_min_cny"], "")
 
+    # ---------- ④ 重试不免费：必须讲清"区间可能被突破" ----------
+    print("\n[4] 重试费用口径（估算不含重试，必须显式说明）")
+    note = pf.cost.get("retry_note") or ""
+    check("预检给出了重试口径说明", bool(note), note[:56])
+    check("说明里点明『重试同样计费』", "重试同样计费" in note or "重试" in note, "")
+    check("说明里点明『实际费用可能高于上限』", "高于上限" in note, "")
+    check("说明里给出实测重试次数（0 次）作为依据", "0 重试" in note or "32 次" in note, "")
+
+    # 客户端确实会重试（否则这条说明就是多余的）
+    import app.llm.client as _client
+    src = Path(_client.__file__).read_text(encoding="utf-8")
+    check("客户端确实实现了重试（说明不是无的放矢）",
+          "retry" in src.lower() and "attempts" in src, "")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
     print("\n" + "=" * 88)

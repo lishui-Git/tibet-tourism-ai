@@ -374,6 +374,15 @@ def collect() -> Preflight:
         "spot_report_cost_cny": report_cost_rounded,
         "total_cost_min_cny": round(comment_min + report_cost_rounded, 2),
         "total_cost_max_cny": round(comment_max + report_cost_rounded, 2),
+        # 【口径说明】上面两个数是"**一次成功、无重试**"的估算。
+        # 客户端对网络错误/5xx/限流会**重试**（`--max-retry` 默认 2），重试是**额外计费**的。
+        # 32 次实测里 attempts == requests（0 次重试），因此这里没有可用的重试率来加权；
+        # 与其用猜的比例去"修正"，不如**把这条风险讲清楚**，让读者知道区间可能被突破。
+        "retry_note": (
+            "以上为『一次成功、无重试』估算。网络错误/5xx/限流会自动重试且**重试同样计费**"
+            "（--max-retry 默认 2）。每次重试约使该次调用成本翻倍；"
+            "实测 32 次为 0 重试，故未计入——若运行中出现较多重试，实际费用会**高于上限**。"
+        ),
     }
 
     result.integrity = {key: _scalar(sql) for key, sql in INTEGRITY_SQL.items()}
@@ -551,7 +560,10 @@ def print_report(preflight: Preflight | None = None) -> dict[str, Any]:
     print(f"  API 次数合计           : {workload['total_api_calls']}")
     print(f"  预计费用               : 评论级 ¥{cost['comment_cost_min_cny']}–{cost['comment_cost_max_cny']}"
           f" + 景点级 ¥{cost['spot_report_cost_cny']}"
-          f" = 合计 ¥{cost['total_cost_min_cny']}–{cost['total_cost_max_cny']}")
+          f" = 合计 ¥{cost['total_cost_min_cny']}–{cost['total_cost_max_cny']}"
+          f"（按 1 次成功、无重试估算）")
+    if cost.get("retry_note"):
+        print(f"  费用口径说明           : {cost['retry_note']}")
 
     print("\n[5] 数据完整性")
     bad = {k: v for k, v in integrity.items() if v and k not in ("usage_missing", "open_failures")}
