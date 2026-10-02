@@ -130,6 +130,34 @@ def main() -> int:
     check("默认为真实调用 mode='real'", real_raw.get("mode") == "real", str(real_raw.get("mode")))
     check("mock 与真实结果在 raw_json 上可区分", mock_raw.get("mode") != real_raw.get("mode"), "")
 
+    # ---------- G. 不相关选项必须被提示（而不是静默忽略） ----------
+    print("\n[G] 阶段不相关的选项要明确提示（避免生产时误判为『参数坏了』）")
+    import io
+    from contextlib import redirect_stdout
+
+    from app.llm.__main__ import _warn_irrelevant_flags
+
+    def capture(*argv: str) -> str:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _warn_irrelevant_flags(parser.parse_args(list(argv)))
+        return buf.getvalue()
+
+    out_facts = capture("--stage", "facts", "--mock", "--limit", "1")
+    check("--stage facts + --mock → 提示 --mock 不起作用",
+          "不起作用" in out_facts and "--mock" in out_facts, out_facts.strip()[:80])
+
+    out_sem = capture("--stage", "semantic", "--force")
+    check("--stage semantic + --force → 提示 --force 不起作用",
+          "不起作用" in out_sem and "--force" in out_sem, out_sem.strip()[:80])
+
+    out_ok = capture("--stage", "semantic", "--limit", "5")
+    check("选项相关时不打扰（无提示）", out_ok.strip() == "", repr(out_ok[:40]))
+
+    out_rep = capture("--stage", "report", "--concurrency", "3")
+    check("--stage report + --concurrency → 提示不起作用",
+          "不起作用" in out_rep and "--concurrency" in out_rep, out_rep.strip()[:80])
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
     print("\n" + "=" * 84)

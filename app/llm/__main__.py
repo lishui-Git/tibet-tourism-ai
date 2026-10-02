@@ -312,6 +312,51 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+STAGE_IRRELEVANT_FLAGS: dict[str, dict[str, str]] = {
+    # 阶段 → {会被忽略的选项: 原因}
+    "semantic": {
+        "force": "评论语义按游标幂等跳过（已完成的不重复调用），没有 --force 语义",
+        "version": "--version 只对景点事实包 / 景点评价有意义",
+    },
+    "facts": {
+        "mock": "事实包是纯 SQL 聚合、零模型调用，--mock 对它没有意义",
+        "concurrency": "事实包不调用模型，--concurrency 对它没有意义",
+        "force": "事实包默认覆盖重算；如需跳过已存在的请用 --only-missing",
+    },
+    "report": {
+        "concurrency": "景点评价按景点顺序生成（每景点一次调用并立即提交），--concurrency 对它没有意义",
+        "only_missing": "景点评价的幂等由 fact_package_version 决定，不适用 --only-missing",
+    },
+}
+
+
+def _warn_irrelevant_flags(args: argparse.Namespace) -> None:
+    """对当前阶段**不起作用**的选项给出明确提示，而不是静默忽略。
+
+    为什么要提示："我明明加了 `--force`（或 `--concurrency`）啊"是操作者在生产时
+    最容易的误判——参数被静默吞掉时，行为看起来就像"选项坏了"。
+    全量运行前把这些说清楚，比事后解释便宜得多。
+    """
+    stage = getattr(args, "stage", "")
+    relevant = STAGE_IRRELEVANT_FLAGS.get(stage, {})
+    notices: list[str] = []
+    for flag, reason in relevant.items():
+        value = getattr(args, flag, None)
+        if value not in (None, False):
+            notices.append(f"  · --{flag.replace('_', '-')} 对 --stage {stage} 不起作用：{reason}")
+    # --all 会依次跑三个阶段，其中的忽略情况一并说明
+    if stage == "all":
+        for sub in ("semantic", "facts", "report"):
+            for flag, reason in STAGE_IRRELEVANT_FLAGS.get(sub, {}).items():
+                value = getattr(args, flag, None)
+                if value not in (None, False):
+                    notices.append(f"  · --{flag.replace('_', '-')} 对 --stage {sub} 不起作用：{reason}")
+    if notices:
+        print("\n[提示] 以下选项在当前阶段不会生效（已按阶段实际行为执行）：")
+        for line in dict.fromkeys(notices):   # 去重且保持顺序
+            print(line)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _guard_mock(args)
@@ -331,6 +376,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.dry_run:
         print("[dry-run] 只统计不写库；真实调用与写库均不会发生")
+
+    # 明确告知"哪些选项在当前阶段不生效"，避免生产时误判为"参数坏了"
+    _warn_irrelevant_flags(args)
 
     if args.stage == "semantic":
         _print("C-BAT-05 评论语义分析", _run_semantic(args))
