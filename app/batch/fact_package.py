@@ -27,7 +27,7 @@ from datetime import datetime
 from typing import Any, Sequence
 
 from app.batch.task_registry import TaskRecorder, chunked, finish_task, register_task
-from app.db import connection, query_all
+from app.db import connection, query_all, query_one
 from app.llm.prompts import ASPECT_CANDIDATES
 
 # 事实包口径常量（写进 package_json.caliber，前端/论文可直接引用）
@@ -271,12 +271,16 @@ def run_fact_package(
     limit: int | None = None,
     version: str = FACT_PACKAGE_VERSION,
     only_missing: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """构造并写入景点事实包（零模型调用）。
 
     :param spot_ids: 只处理指定景点（调试/补跑）
     :param limit: 小样本：只处理前 N 个景点
     :param only_missing: 已有同版本事实包的景点跳过（默认重算覆盖，因为事实包要反映最新统计）
+    :param dry_run: **只统计不写库**（返回"会处理多少个景点、其中多少已存在"）。
+        为什么必须有它：CLI 的 `--dry-run` 明确承诺"只统计不写库"，
+        但本阶段原先忽略该参数、照样写库并登记任务——**承诺与实际不一致**（实测抓到）。
     """
     started_at = datetime.now()
     targets = query_all(TARGET_SPOTS_SQL)
@@ -285,6 +289,31 @@ def run_fact_package(
         targets = [row for row in targets if int(row["spot_id"]) in wanted]
     if limit:
         targets = targets[:limit]
+
+    if dry_run:
+        # 只做只读统计：不构造 JSON、不写库、不登记任务
+        target_ids = [int(row["spot_id"]) for row in targets]
+        already = 0
+        if target_ids:
+            placeholders = ",".join(["%s"] * len(target_ids))
+            row = query_one(
+                f"SELECT COUNT(*) AS n FROM spot_fact_package "
+                f"WHERE version=%s AND spot_id IN ({placeholders})",
+                (version, *target_ids),
+            ) or {}
+            already = int(row.get("n", 0))
+        would_write = already if only_missing else len(target_ids)
+        pending = len(target_ids) - would_write
+        return {
+            "mode": "dry-run",
+            "version": version,
+            "eligible_spots": len(target_ids),
+            "already_has_version": already,
+            "would_skip": would_write if only_missing else 0,
+            "pending_api_calls": 0,          # 事实包纯 SQL 聚合，永远 0 次模型调用
+            "only_missing": only_missing,
+            "note": "事实包零模型调用；--dry-run 下不写库、不登记任务",
+        }
 
     stats = FactPackageStats(spots_total=len(targets))
     packages: list[tuple[dict, dict]] = []

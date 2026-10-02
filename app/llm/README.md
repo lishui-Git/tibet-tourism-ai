@@ -179,7 +179,17 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 |---|---|
 | `--stage preflight` | 全局体检：待调用/待复用/待生成份数 + 费用区间 + `STATUS` |
 | `--stage semantic --dry-run` | `api_calls_planned`、`estimated_tokens_per_call`（实测均值与区间）、`estimated_cost_cny`（min/max） |
+| `--stage facts --dry-run` | `eligible_spots`（可评价景点数）、`already_has_version`、`pending_api_calls: 0`（事实包零模型调用） |
 | `--stage report --dry-run` | `eligible_spots`（业务口径：评论量 ≥100 的景点数）、`packages_available`（当前就绪事实包）、`pending_api_calls`（本次真正会调用的份数）、必要时给出 `hint` 提示先跑 facts |
+
+> **为什么要把 `--dry-run` 也测起来**：CLI 会打印
+> `[dry-run] 只统计不写库；真实调用与写库均不会发生`——这是**代码的承诺**。
+> 本轮实测抓到它被违反过：`--stage all --dry-run` 里 C-BAT-06 **忽略**了 `dry_run` 参数，
+> 照样写入 57 行事实包并登记 1 条任务（零成本，但**改变了库状态**）。
+> 这会让"先试跑看看"变得不可信，并让后续 `report --dry-run` 报出
+> `packages_available=57`、误导人以为"评价依据已就绪"。
+> 现已补齐，并由 `scripts/test_dry_run_contract.py`（11 项）断言
+> **四个 dry-run 组合跑完后 17 张表逐表未变**、且事实包输出自证"零调用"。
 
 > **为什么要分 `eligible_spots` 与 `packages_available`**：这两个数天然不同——
 > 前者是"设计上应该生成评价的景点数"（57），后者是"当前库里已有事实包、因而**马上**能生成的份数"。
@@ -333,8 +343,7 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 3. 真实小样本已通过，且记录了真实 token/费用（见 §8.2）；
 4. 明确指定"全量"并带 `--yes`（默认不跑全量，避免误触发 4.7 万次调用）。
 
-### 9.1 离线模式（开发/演示期的零消费保证）
-```powershell
+### 9.1 离线模式（开发/演示期的零消费保证）```powershell
 # 任何真实调用都被硬阻断；只允许 preflight / check / --dry-run / --mock
 .\.venv\Scripts\python.exe -m app.llm --stage semantic --yes --offline
 #   → [已阻断] 离线模式下不允许执行 --stage semantic 的真实调用。
@@ -385,8 +394,7 @@ $env:APP_LLM_OFFLINE = "1"   # 也可以用环境变量全局生效
 ## 11. 答辩时重点理解
 
 1. **为什么"事实"与"解释"必须分开**：统计数字由 SQL 产生、模型只负责语言组织，
-   这是 `BR-07`「生成内容必须基于给定事实」在工程上的落地方式，也是防止"模型编数"的唯一可靠办法。
-2. **为什么 evidence 必须是原文子串**：这是"数据负责事实"在**单条评论粒度**的强制校验——
+   这是 `BR-07`「生成内容必须基于给定事实」在工程上的落地方式，也是防止"模型编数"的唯一可靠办法。2. **为什么 evidence 必须是原文子串**：这是"数据负责事实"在**单条评论粒度**的强制校验——
    模型若给出原文里找不到的"证据"，说明它在编造，该方面直接弃用（§15.A.4 第 5 条）。
    **实测 32 条评论中就有 20 个方面被这条规则拦下**，说明该规则不是摆设。
 3. **为什么幂等键选在结果表自身**：断点游标等于"结果表里已有什么"，

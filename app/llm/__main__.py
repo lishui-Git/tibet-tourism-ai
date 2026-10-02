@@ -164,6 +164,7 @@ def _run_facts(args: argparse.Namespace) -> dict[str, Any]:
         limit=args.limit,
         version=args.version or FACT_PACKAGE_VERSION,
         only_missing=args.only_missing,
+        dry_run=args.dry_run,   # 承诺"只统计不写库"必须落到本阶段（原先被忽略，实测抓到）
     )
 
 
