@@ -149,7 +149,7 @@
 | 项 | 实现 |
 |---|---|
 | 口令存储 | **PBKDF2-HMAC-SHA256** 加盐（20 万次迭代），存储串含算法名与迭代次数，便于日后升级参数而不失效旧口令。**不引入第三方依赖**（`requirements.txt` 冻结：不加 bcrypt/passlib） |
-| 会话 | Flask 签名 Cookie（密钥 `APP_SECRET_KEY`，未配置时生成一次性随机密钥）；`HttpOnly` + `SameSite=Lax`；**只存 `user_id`** |
+| 会话 | Flask 签名 Cookie（密钥 `APP_SECRET_KEY`，**本机 `.env` 已配置**，因此**重启服务后登录态仍有效**；未配置时会退化为一次性随机密钥、重启即失效）；`HttpOnly` + `SameSite=Lax`；**只存 `user_id`** |
 | 每次请求回查 | `current_user()` 每次请求都回查 `sys_user` 确认"用户仍存在且未停用"，否则清会话——**帐号停用后旧 Cookie 立即失效**（已实测） |
 | 角色 | 注册一律 `user`；**管理员只能由 `scripts/create_admin.py` 创建**，注册接口传入 `role=admin` 会被忽略（防自助提权，已实测） |
 | 接口鉴权 | `@login_required` → 未登录 2001(401)；`@admin_required` → 未登录 2001、非管理员 2002(403) |
@@ -196,6 +196,9 @@
 
 # 认证与鉴权测试（口令哈希 / 注册 / 登录 / 会话 / 越权 / 停用失效；测试用户自动清理）
 .\.venv\Scripts\python.exe scripts\test_auth.py
+
+# 事实包验证：证明 C-BAT-06 零模型调用 + 幂等跳过 + 清理回基线
+.\.venv\Scripts\python.exe scripts\test_fact_package.py
 
 # 接口字段契约校验：逐个断言"前端依赖的字段"确实存在（仅公开接口）
 .\.venv\Scripts\python.exe scripts\check_api_contract.py
