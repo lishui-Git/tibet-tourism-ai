@@ -139,6 +139,23 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 | ③ 重试仍失败 | 把已付费结果写入 `logs/recovery/semantic_<n>.jsonl`（按 `comment_id % 100` 分片），控制台明确提示"已落盘待补" |
 | ④ 补写 | 数据未入库的评论**仍然是待处理**，下次正式运行时会被游标重新选中并按正常流程写库；落盘文件只作为"结果没丢"的凭证与人工补写依据 |
 
+### 7.2 运行结束后的"实际 usage / 实际费用"
+
+保险机制第 11 条要求"运行结束后输出**实际** usage 与实际费用"，两个生成组件都做到了：
+
+| 组件 | 实际用量 | 实际费用 |
+|---|---|---|
+| **C-BAT-05 评论语义** | 每次调用的 `usage` 写入 `sentiment.raw_json.usage` | `CallStats` 累计输入/输出 token × 实际单价 |
+| **C-BAT-07 景点评价** | 每次调用的 `usage` 拆分写入 `CallStats`（修复轮的两次调用**累加**） | `_estimate_cost()` 按**实际拆分** × 实际单价计算 |
+
+> **本轮修正的一处口径问题**：`spot_report` 原先只把 token **总量**塞进 `CallStats`
+> （`usage={"total_tokens": n}`），导致 `prompt_tokens` 恒为 0，
+> 费用只能按 **7:3 经验比例**估算。而输入 ¥2/M、输出 ¥8/M 相差 4 倍，
+> 比例猜错就会算错钱。现已改为返回**真实用量**（含 prompt/completion 拆分，修复轮累加），
+> 费用按 `prompt/1e6×单价_in + completion/1e6×单价_out` 精确计算，
+> 结果字段也从 `cost_total_cny_estimated` 改名为 `cost_total_cny`（口径变了，名字要跟着变）。
+> 由 `scripts/test_report_usage.py`（11 项）固定：断言拆分保留、费用与手算一致、修复轮累加。
+
 > **同一套兜底也覆盖景点评价（C-BAT-07）**：`run_spot_report` 的写库失败同样会
 > "只重试写库 → 落盘待补 → 记 `task_log`(ERROR) 并继续下一个景点"，
 > 且**每个景点写成功即提交**。共享实现见 `app/batch/write_recovery.py`，

@@ -45,6 +45,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_auth.py", "认证与鉴权（口令哈希、注册登录、越权、停用失效）", False),
     ("test_qa.py", "M5 智能问答（分类、检索、三条不调用模型的分支、越权）", False),
     ("test_report_regen.py", "接口 19 重新生成评价（在线只登记 / 离线 MockClient 强制重生成）", False),
+    ("test_report_usage.py", "景点评价实际 usage 与费用（含修复轮累加；假客户端）", False),
     ("test_write_recovery.py", "写库失败兜底（注入写库失败 → 只重试写库、落盘待补，不重新调用模型）", False),
     ("test_fact_package.py", "事实包（C-BAT-06 零模型调用 + 幂等跳过 + 清理回基线）", False),
     ("test_spot_report_write_failure.py", "景点评价写库失败兜底（注入写库失败 → 批次继续 + 落盘待补）", False),

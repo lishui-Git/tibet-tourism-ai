@@ -89,16 +89,20 @@ def load_fact_packages(*, version: str | None = None, spot_ids: Sequence[int] | 
     return query_all(sql, tuple(params))
 
 
-def generate_one(client: ChatClient, package: dict) -> tuple[Any, int]:
+def generate_one(client: ChatClient, package: dict) -> tuple[Any, dict[str, int]]:
     """生成并校验一份景点评价。
 
-    :returns: `(ReportResult, token_usage)`
+    :returns: `(ReportResult, usage)`；`usage` 是**真实调用返回的用量**，
+        含 `prompt_tokens` / `completion_tokens` / `total_tokens`（修复轮会累加）。
+        为什么要保留输入/输出拆分（而不是只给总量）：输入与输出单价不同
+        （¥2/M vs ¥8/M），只留总量就只能靠经验比例估算费用，
+        无法满足"运行结束后输出**实际** usage 与实际费用"的要求。
     :raises LlmError: 调用失败
     :raises ValidationError: 结构不可用（修复轮后仍失败）
     """
     messages = build_report_messages(package)
     response = client.chat(messages, temperature=TEMPERATURE, max_tokens=MAX_TOKENS)
-    tokens = int(response.usage.get("total_tokens") or 0)
+    usage = _usage_of(response)
 
     try:
         result = validate_report(extract_json_text(response.content))
@@ -109,7 +113,7 @@ def generate_one(client: ChatClient, package: dict) -> tuple[Any, int]:
             {"role": "user", "content": f"上一次输出未通过校验：{exc}\n请严格按 Schema 重新输出 JSON。"},
         ]
         retry = client.chat(repair, temperature=TEMPERATURE, max_tokens=MAX_TOKENS)
-        tokens += int(retry.usage.get("total_tokens") or 0)
+        usage = _add_usage(usage, _usage_of(retry))
         result = validate_report(extract_json_text(retry.content))
         result.repairs.append(f"首次校验失败后修复成功：{exc}")
 
@@ -118,7 +122,23 @@ def generate_one(client: ChatClient, package: dict) -> tuple[Any, int]:
     if mismatches:
         result.need_review = 1
         result.number_mismatches = mismatches
-    return result, tokens
+    return result, usage
+
+
+def _usage_of(response: Any) -> dict[str, int]:
+    """取一次调用的真实用量（缺失字段按 0 处理，不猜数）。"""
+    raw = getattr(response, "usage", None) or {}
+    return {
+        "prompt_tokens": int(raw.get("prompt_tokens") or 0),
+        "completion_tokens": int(raw.get("completion_tokens") or 0),
+        "total_tokens": int(raw.get("total_tokens") or 0),
+    }
+
+
+def _add_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
+    """累加两次调用的用量（修复轮场景）。"""
+    return {key: int(left.get(key, 0)) + int(right.get(key, 0)) for key in
+            ("prompt_tokens", "completion_tokens", "total_tokens")}
 
 
 def run_spot_report(
@@ -187,7 +207,7 @@ def run_spot_report(
             if isinstance(package, str):  # PyMySQL 在部分版本下把 JSON 列返回为字符串
                 package = json.loads(package)
             try:
-                result, tokens = generate_one(client, package)
+                result, usage = generate_one(client, package)
             except LlmError as exc:
                 stats.failed += 1
                 call_stats.record_failure(attempts=1, kind=exc.kind)
@@ -204,7 +224,8 @@ def run_spot_report(
                 recorder.error("spot_report", f"未预期异常：{type(exc).__name__}: {exc}", ref_key=str(spot_id))
                 continue
 
-            call_stats.record_success(_zero_usage_result(tokens))
+            # 记录**真实**用量（含输入/输出拆分）——费用因此可按实际单价算出，而非按经验比例估算
+            call_stats.record_success(_usage_result(usage))
 
             # 写库与"已付费结果"的保护：
             # ① 写失败只重试写库（绝不重新调用模型），仍失败则把结果落盘待补；
@@ -218,7 +239,7 @@ def run_spot_report(
                 "issues": result.issues,
                 "visitor_focus": result.visitor_focus,
                 "need_review": result.need_review,
-                "token_usage": tokens,
+                "token_usage": int(usage.get("total_tokens") or 0),
                 "model": settings.deepseek.model if not mock else "mock",
             }
 
@@ -299,27 +320,41 @@ def run_spot_report(
     return summary
 
 
-def _zero_usage_result(total_tokens: int):
-    """把"只关心 token 总量"的场景包装成 `ChatResult`，用于复用 `CallStats` 统计。"""
+def _usage_result(usage: dict[str, int]):
+    """把一次（或含修复轮的多次）真实用量包装成 `ChatResult`，用于 `CallStats` 统计。
+
+    与旧版 `_zero_usage_result` 的区别：**保留 prompt/completion 拆分**。
+    旧版只塞 `total_tokens`，导致 `CallStats.prompt_tokens` 恒为 0，
+    费用只能按 7:3 的经验比例估算——那与"输出实际 usage 与实际费用"的要求不符。
+    """
     from app.llm.client import ChatResult
 
-    return ChatResult(content="", model="", usage={"total_tokens": total_tokens}, latency_ms=0, attempts=1)
+    return ChatResult(
+        content="",
+        model="",
+        usage={
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "total_tokens": int(usage.get("total_tokens") or 0),
+        },
+        latency_ms=0,
+        attempts=1,
+    )
 
 
 def _estimate_cost(call_stats: CallStats) -> dict[str, Any]:
-    """景点级成本估算（token 已记录在 `spot_report.token_usage`，这里只做汇总）。"""
+    """景点级成本（按**实际**输入/输出 token 与单价计算，不再用经验比例估算）。"""
     from app.config import settings
 
-    # 修复轮的 token 无法区分输入/输出，按 7:3 的经验比例拆分，仅用于估算
-    prompt_tokens = int(call_stats.total_tokens * 0.7)
-    completion_tokens = call_stats.total_tokens - prompt_tokens
     cost = (
-        prompt_tokens / 1_000_000 * settings.deepseek.price_input
-        + completion_tokens / 1_000_000 * settings.deepseek.price_output
+        call_stats.prompt_tokens / 1_000_000 * settings.deepseek.price_input
+        + call_stats.completion_tokens / 1_000_000 * settings.deepseek.price_output
     )
     return {
+        "prompt_tokens": call_stats.prompt_tokens,
+        "completion_tokens": call_stats.completion_tokens,
         "total_tokens": call_stats.total_tokens,
-        "cost_total_cny_estimated": round(cost, 4),
+        "cost_total_cny": round(cost, 4),
         "price_input_per_million": settings.deepseek.price_input,
         "price_output_per_million": settings.deepseek.price_output,
     }
