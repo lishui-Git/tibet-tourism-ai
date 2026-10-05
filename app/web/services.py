@@ -248,7 +248,9 @@ def overview_data_note() -> dict[str, Any]:
     """数据来源、质量与已知局限（FR-OV 的"数据说明"）。"""
     return {
         "dataset": "西藏及进藏沿线（川藏/滇藏/青藏线）旅游景点评论数据集",
-        "source": "携程景点评论页公开评论（阶段一采集、阶段二清洗、阶段三离线分析）",
+        # 文案面向**普通用户**：不出现"阶段一/二/三"这类内部开发分期，
+        # 也不出现 method / deepseek / mllib 等实现标识（改版前的措辞会直接显示在页面上）。
+        "source": "来源为该平台景点页面的公开游客评论，经统一清洗与离线分析后入库，不含实时数据。",
         "size": {
             "reviews": scalar("SELECT COUNT(*) FROM review"),
             "spots": scalar("SELECT COUNT(*) FROM spot"),
@@ -269,9 +271,10 @@ def overview_data_note() -> dict[str, Any]:
             CALIBER_THRESHOLD,
             CALIBER_ASPECT,
             "评论为历史快照，不含实时数据；系统不做实时分析。",
-            "情感存在两种方法（deepseek / mllib），结论不可混用，需按 method 区分展示。",
+            "评论情感有两种判定口径（深度语义判定与统计基线判定），两者的结论不可混用，"
+            "页面会分别标注所用的口径。",
         ],
-        "caliber_note": "以上为数据来源与已知局限说明，供前端『数据说明』区域展示。",
+        "caliber_note": "以上为数据来源与已知局限说明。",
         "sample_size": scalar("SELECT COUNT(*) FROM review"),
     }
 

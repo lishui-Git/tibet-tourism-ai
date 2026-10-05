@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}管理后台 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}任务状态 · 数据口径 · 系统自检{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>当前登录</h2>
+  <div id="whoami" class="whoami"></div>
+  <button id="btn-logout" type="button" class="ghost">退出登录</button>
+</section>
+
+<section class="card">
+  <h2>系统运行自检</h2>
+  <p class="hint">检查应用是否正常、数据库是否可连接、数据表是否齐全。该检查只读，不影响任何数据。</p>
+  <button id="btn-check" type="button">运行自检</button>
+  <pre id="check-out" class="out">点击上方按钮开始检查…</pre>
+</section>
+
+<section class="card">
+  <h2>数据口径</h2>
+  <p class="hint">
+    以下口径会随受影响的统计数据一并展示，确保读者知道每个数字的适用范围与有效样本量。
+  </p>
+  <div id="caliber-body"></div>
+</section>
+
+<section class="card">
+  <h2>批处理任务</h2>
+  <p class="hint">
+    分析结果由离线批处理任务生成。这里可以查看各任务的状态、处理量与日志明细。
+    <strong>本页面只读取任务记录，不会触发任何分析或调用。</strong>
+  </p>
+  <p class="hint">
+    任务类型：
+    <select id="task-type">
+      <option value="">全部</option>
+      <option value="clean">数据导入与清洗</option>
+      <option value="stat">统计聚合</option>
+      <option value="mllib">情感基线</option>
+      <option value="lda">主题分析</option>
+      <option value="semantic">评论语义分析</option>
+      <option value="fact_package">景点事实汇总</option>
+      <option value="spot_report">景点评价生成</option>
+    </select>
+    <button id="btn-tasks" type="button">刷新</button>
+  </p>
+  <div id="task-summary"></div>
+  <div id="task-table"></div>
+
+  <h3>任务日志</h3>
+  <p class="hint">点击上方任务行的「日志」按钮查看明细（含每步处理量与失败记录）。</p>
+  <div id="task-logs"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/tasks.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

@@ -4,38 +4,75 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}西藏旅游景点智能评价与分析系统{% endblock %}</title>
+  <meta name="description" content="面向西藏及进藏沿线旅游景点评论的离线智能分析平台：数据总览、景点分析、智能评价与问答、景点对比。">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   {% block head %}{% endblock %}
 </head>
 <body>
+
+  {#
+    一级导航（§四）：首页｜数据总览｜景点分析｜智能分析｜景点对比｜管理员
+    · 「智能评价」与「智能问答」不再是两个一级入口，合并到「智能分析」内部。
+    · 管理员入口固定在最右，未登录时显示「管理员」（指向登录页），
+      已登录时显示「管理后台」。普通用户根本不需要登录。
+  #}
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
-        <h1>基于 DeepSeek 的西藏旅游景点智能评价与分析系统</h1>
-        <p class="subtitle">{% block subtitle %}离线智能分析结果查询平台{% endblock %}</p>
+        <h1>西藏旅游景点智能评价与分析系统</h1>
+        <p class="subtitle">{% block subtitle %}基于游客评论的离线智能分析平台{% endblock %}</p>
       </div>
-      <nav class="mainnav">
-        <a href="/">首页</a>
-        <a href="/overview">数据总览</a>
-        <a href="/spots">景点分析</a>
-        <a href="/evaluation">智能评价</a>
-        <a href="/compare">景点对比</a>
-        <a href="/qa">智能问答</a>
-        <a href="/tasks">任务与口径</a>
+      <nav class="mainnav" aria-label="主导航">
+        <a href="{{ url_for('pages.index') }}" data-nav="home">首页</a>
+        <a href="{{ url_for('pages.overview_page') }}" data-nav="overview">数据总览</a>
+        <a href="{{ url_for('pages.spots_page') }}" data-nav="spots">景点分析</a>
+        <a href="{{ url_for('pages.smart_page') }}" data-nav="smart">智能分析</a>
+        <a href="{{ url_for('pages.compare_page') }}" data-nav="compare">景点对比</a>
+        <span class="nav-sep" aria-hidden="true"></span>
+        {% if current_user %}
+        <a href="{{ url_for('pages.admin_page') }}" data-nav="admin">管理后台</a>
+        {% else %}
+        <a href="{{ url_for('pages.login_page') }}" data-nav="login">管理员</a>
+        {% endif %}
       </nav>
     </div>
   </header>
 
   <main class="wrap">
+    {% block pagehead %}{% endblock %}
     {% block content %}{% endblock %}
   </main>
 
   <footer class="footer">
-    <p>
-      本系统面向旅游评论数据集的<strong>离线</strong>智能分析：DeepSeek 负责离线语义结构化，
-      Web 层只读取已落库的分析结果——因此页面刷新不产生任何模型调用费用，结果可复现。
-    </p>
+    <div class="footer-inner">
+      <p class="footer-brand">西藏旅游景点智能评价与分析系统</p>
+      <p>
+        数据范围：西藏及进藏沿线（川藏／滇藏／青藏线）旅游景点游客评论。
+        分析结果在<strong>离线阶段</strong>生产并入库，本平台只读取已生成的结果——
+        因此页面浏览与刷新<strong>不会</strong>产生任何模型调用，结果可复现。
+      </p>
+      <details class="fold">
+        <summary>数据口径与已知局限</summary>
+        <div class="fold-body">
+          <p>
+            评论样本共 <strong>59,033</strong> 条，覆盖 <strong>837</strong> 个景点；
+            其中评论量达到 100 条的 <strong>57</strong> 个景点具备生成完整智能评价的条件，
+            其余景点只提供基础统计并明确说明样本不足。
+          </p>
+          <p>
+            客源地统计仅使用发布时间在 2022-08-01 之后的评论（平台自该日期起才展示 IP 归属地），
+            因此该项的有效样本量小于评论总数，页面对应位置会同时标注口径与有效样本量。
+          </p>
+          <p>
+            评论情感与方面分析基于评论正文的语义判定，不含外部知识；
+            某方面有效样本不足 10 条时只展示样本量、不给出结论。
+          </p>
+        </div>
+      </details>
+    </div>
   </footer>
+
+  <button id="back-to-top" type="button" title="返回顶部" aria-label="返回顶部">↑</button>
 
   <script src="{{ url_for('static', filename='vendor/echarts.min.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/axios.min.js') }}"></script>

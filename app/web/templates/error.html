@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}提示{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>{{ title }}</h2>
+  <p class="hint">{{ detail }}</p>
+  <p class="hint">
+    你可以返回
+    <a class="link" href="{{ url_for('pages.index') }}">首页</a>，
+    或前往
+    <a class="link" href="{{ url_for('pages.overview_page') }}">数据总览</a>、
+    <a class="link" href="{{ url_for('pages.spots_page') }}">景点分析</a>、
+    <a class="link" href="{{ url_for('pages.smart_page') }}">智能分析</a>、
+    <a class="link" href="{{ url_for('pages.compare_page') }}">景点对比</a>。
+  </p>
+</section>
+{% endblock %}

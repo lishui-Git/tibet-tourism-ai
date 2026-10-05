@@ -39,13 +39,14 @@
   <h2>三、景点详情：<span id="detail-name"></span></h2>
   <div id="detail-body"></div>
 
-  <h3>情感分布（按方法对照）</h3>
+  <h3>情感分布</h3>
   <p class="hint">
-    方法：
+    判定口径：
     <select id="sentiment-method">
-      <option value="mllib">mllib（Spark 基线，全量）</option>
-      <option value="deepseek">deepseek（大模型语义）</option>
+      <option value="semantic">深度语义判定（对评论正文逐条做语义分析）</option>
+      <option value="baseline">统计基线判定（覆盖全部评论的快速判定）</option>
     </select>
+    　两种口径的结论不可混用，因此分开展示。
   </p>
   <div id="chart-sentiment" class="chart chart-wide"></div>
   <div id="sentiment-note"></div>
@@ -53,15 +54,17 @@
   <h3>评论量时间趋势</h3>
   <div id="chart-spot-trend" class="chart chart-wide"></div>
 
-  <h3>方面分析</h3>
-  <p class="hint">样本量不足 10 条的方面不出结论（BR-04），只展示样本量。</p>
+  <h3>游客关注的方面</h3>
+  <p class="hint">某个方面的有效样本不足 10 条时，只展示样本量、不给出结论。</p>
   <div id="aspect-table"></div>
   <div id="aspect-note"></div>
 
-  <h3>LDA 主题</h3>
+  <h3>评论主题</h3>
+  <p class="hint">从评论正文中自动归纳出的高频话题，每个主题由若干关键词构成。</p>
   <div id="topic-body"></div>
 
   <h3>代表性评论</h3>
+  <p class="hint">按情感倾向各取若干条具有代表性的评论原文。</p>
   <div id="review-body"></div>
 </section>
 {% endblock %}

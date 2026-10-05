@@ -1,33 +1,40 @@
 {% extends "base.html" %}
-{% block title %}登录 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}登录后可查看任务与口径（数据口径与批处理状态）{% endblock %}
+{% block title %}管理员登录 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}管理端功能登录{% endblock %}
 
 {% block content %}
-<section class="card login-card">
-  <h2>登录</h2>
-  <p class="hint">
-    任务监控与口径配置属管理端功能，需要登录（管理员）。
-    账号由 `scripts/create_admin.py` 创建——**不提供自助注册管理员**，避免提权。
-  </p>
-  <div class="login-form">
-    <label>用户名 <input id="login-user" type="text" autocomplete="username" /></label>
-    <label>口令 <input id="login-pass" type="password" autocomplete="current-password" /></label>
-    <button id="btn-login" type="button">登录</button>
-  </div>
-  <div id="login-msg"></div>
-</section>
-
-<section class="card">
-  <h2>为什么需要登录</h2>
-  <table class="data-table">
-    <tbody>
-      <tr><th>公开的数据</th><td>数据总览、景点分析、智能评价、景点对比 —— 均为只读分析结果，无需登录</td></tr>
-      <tr><th>需登录</th><td>任务状态与日志、用户列表、数据口径配置（管理端）</td></tr>
-      <tr><th>口令存储</th><td>PBKDF2-HMAC-SHA256 加盐哈希，库中不存明文（NR-S-01）</td></tr>
-      <tr><th>会话</th><td>签名 Cookie；帐号被停用后旧会话立即失效</td></tr>
-    </tbody>
-  </table>
-</section>
+<div class="login-shell">
+  <section class="card login-card">
+    <h2>管理员登录</h2>
+    <p class="hint" style="text-align:center">
+      管理端提供任务状态、系统日志与数据口径查看。公开的分析页面无需登录。
+    </p>
+    <div class="login-form">
+      <label>用户名
+        <input id="login-user" type="text" autocomplete="username" placeholder="管理员用户名" />
+      </label>
+      <label>口令
+        <input id="login-pass" type="password" autocomplete="current-password" placeholder="登录口令" />
+      </label>
+      <button id="btn-login" type="button">登录</button>
+    </div>
+    <div id="login-msg"></div>
+    <details class="fold">
+      <summary>账号与安全说明</summary>
+      <div class="fold-body">
+        <table class="data-table">
+          <tbody>
+            <tr><th>公共页面</th><td>数据总览、景点分析、智能分析、景点对比——均为只读分析结果，<strong>无需登录</strong></td></tr>
+            <tr><th>需要登录</th><td>任务状态与日志、数据口径、系统自检</td></tr>
+            <tr><th>账号来源</th><td>由系统管理员在服务器端创建，<strong>不提供自助注册</strong>，避免权限被提升</td></tr>
+            <tr><th>口令存储</th><td>加盐哈希存储，数据库中不留明文</td></tr>
+            <tr><th>会话</th><td>签名 Cookie；账号被停用后旧会话立即失效</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}

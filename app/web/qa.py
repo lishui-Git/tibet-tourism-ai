@@ -158,8 +158,19 @@ def match_spots(question: str, limit: int = 5) -> list[dict[str, Any]]:
                 candidates.append((prefix, row))
                 break
 
-    # 长匹配串优先（避免短名吃掉长名），同长按出现位置
-    candidates.sort(key=lambda item: (-len(item[0]), text.find(item[0])))
+    # 候选排序（顺序即优先级，越靠前越可能被采纳）：
+    #   ① **整名命中**优先于前缀命中 —— 用户说了完整景点名时应当选中该景点本身；
+    #   ② 匹配串长的优先（避免短名吃掉长名，例如同时出现「纳木措」与「圣象天门」）；
+    #   ③ **评论量高的优先** —— 同名/同前缀的多个景点中，用户几乎总是想了解主要景点。
+    #      实测踩到过：问「布达拉宫怎么样」被匹配到「布达拉宫-殊胜三界殿」（仅 1 条评论），
+    #      而真正的布达拉宫有 3,965 条评论。原因是旧排序只看"匹配串长度"，
+    #      「布达拉宫-殊胜三界殿」能提供更长的前缀匹配串，于是把主景点挤掉了。
+    candidates.sort(key=lambda item: (
+        0 if item[1]["spot_name"] == item[0] else 1,      # ① 整名优先
+        -len(item[0]),                                     # ② 匹配串更长优先
+        -int(item[1].get("review_count") or 0),            # ③ 评论量更高优先
+        text.find(item[0]),                                # ④ 在问题中出现更早优先
+    ))
 
     matched: list[dict[str, Any]] = []
     used: list[tuple[int, int]] = []
