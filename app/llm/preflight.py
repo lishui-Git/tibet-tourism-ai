@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
 from app import __version__
 from app.db import query_all, query_one
@@ -36,20 +36,89 @@ CORE_TABLE_BASELINE: dict[str, dict[str, Any]] = {
     "review": {"rows": 59033, "crc32": 1060622212},
 }
 
-# 实测成本参数（32 次真实调用）：
-#   单条平均 **480** token（区间 431–562）
-#   输入 10,691 / 输出 4,681 / 合计 15,372  ⇒ 输入 69.5% / 输出 **30.5%**
+# 实测成本参数 —— 两个**样本不同**，不要混为一谈（2026-10-06 重新校准）：
 #
-# 【修正说明】此前这里写的是 `INPUT_SHARE=0.73 / OUTPUT_SHARE=0.27`，
-# 但用实测汇总反算应为 **0.6955 / 0.3045**。判据：4,681 / 15,372 = 0.3045 恰好复算出
-# 文档记录的实付金额 ¥0.0588（而 0.27 会算出 ¥0.0559）——所以 0.27 是错的。
-# 影响：输出单价是输入的 4 倍，比例偏差会使费用估算**偏低约 1.8%**；
-# 方向上是"低报"，对预算判断不利，必须按实测改正。
+# ① 「32 次进程统计」：输入 10,691 / 输出 4,681 / 合计 15,372 ⇒ 均值 **480 token/条**。
+#    来源是当时运行日志的 `CallStats`，落到库里的只有最后 8 条。
+#    它仍是**覆盖面最大**的一次真实调用样本（32 条），因此均值继续沿用 480。
+#
+# ② 「库内可复核样本」：`sentiment.raw_json.usage` 现存 **8** 条，
+#    逐条为 392 / 402 / 403 / 407 / 408 / 409 / 429 / **600**（合计 3,450，均值 431.3）。
+#    这是**任何人都能用只读 SQL 复核**的样本，因此区间上下界改以它为准：
+#      · 下界 **392**（现存最小值；原写 431，是 32 次进程统计的最小值）
+#      · 上界 **600**（现存最大值；原写 562 —— 已被库里那条 600 token 的评论**突破**）
+#
+# 【上界为什么必须改】旧上界 562 只是**那次 32 条样本内的最大值**，不是"全量最坏情况"：
+# 该样本取 `comment_id` 最小者，正文极短（8 条里 7 条只有 15–22 字，最长那条 126 字便已 600）。
+# 而全量待处理的 47,702 条里，正文 >126 字的有 **5,637** 条（>300 字 1,094 条，最长 1,829 字）。
+# 拿一个明显更短样本的最大值当"全量上限"，方向上是**低报风险**。
+# 因此：
+#   · `MEASURED_TOKENS_PER_CALL_MAX = 600` 的含义严格限定为「**已观察到的真实最大 token**」；
+#   · 更保守、随正文长度变化的**保守估算上界**由 `conservative_tokens_per_call()` 单独给出。
+# 由 `scripts/test_cost_model.py` 固定：**库内现存 usage 的最大值不得超过本常量**——
+# 一旦将来跑出更大值，该测试会失败并强制重新校准，而不是让成本模型悄悄漂移。
+#
+# 【保留的旧修正说明】`INPUT_SHARE`/`OUTPUT_SHARE` 原为 0.73/0.27，用实测汇总反算应为
+# 0.6955/0.3045（4,681 / 15,372 = 0.3045 恰好复算出实付 ¥0.0588，0.27 会算出 ¥0.0559）。
+# 输出单价是输入的 4 倍，比例偏小会使费用估算**偏低约 1.8%**，方向不利，故按实测改正。
 MEASURED_TOKENS_PER_CALL = 480
-MEASURED_TOKENS_PER_CALL_MIN = 431
-MEASURED_TOKENS_PER_CALL_MAX = 562
+MEASURED_TOKENS_PER_CALL_MIN = 392
+MEASURED_TOKENS_PER_CALL_MAX = 600
 INPUT_SHARE = 0.6955
 OUTPUT_SHARE = 0.3045
+
+def _bucket_of_chars(body_chars: int) -> str:
+    """与 `LENGTH_BUCKET_SQL` **完全同口径**的分桶标签（用于按桶名精确统计）。"""
+    n = int(body_chars or 0)
+    for upper, label in ((20, "01: <=20"), (40, "02: 21-40"), (60, "03: 41-60"),
+                         (80, "04: 61-80"), (100, "05: 81-100"), (150, "06: 101-150"),
+                         (200, "07: 151-200"), (300, "08: 201-300"), (500, "09: 301-500"),
+                         (1000, "10: 501-1000")):
+        if n <= upper:
+            return label
+    return "11: >1000"
+
+
+# 保守上界推导所锚定的"样本最长正文"长度：库内 8 条 usage 样本里最长的那条正文为 126 字
+# （token 600，即当前已观察到的最大值）。超过这个长度的评论，样本**完全没有覆盖**，
+# 因此按桶名精确统计它们的条数，用来提醒"样本之外的量有多大"。
+SAMPLE_MAX_BODY_CHARS = 126
+
+# ---------------------------------------------------------------------------
+# 三、保守估算上界：长评论到底贵多少（可解释、可复核，无需调用任何 API）
+# ---------------------------------------------------------------------------
+# 推导全部来自已实测的库内数据：
+#   · 固定部分：8 条样本里最短正文（15–22 字）的 `prompt_tokens` 为 304–312
+#     ⇒ 与正文长度无关的固定 prompt（system + 输出 Schema + 景点名）约 **300 token**；
+#   · 正文部分：中文约 **0.7 token/字**（0.65 是常见下限，这里取 0.7，偏保守）；
+#   · 输出部分：单次调用 `max_tokens=512`（见 `semantic_analysis.MAX_TOKENS`），
+#     实测输出 88–232；保守取 **300**（不取满 512，避免把上界推成没有指导意义的数字）。
+# 单条保守上界 = 300（固定 prompt）+ 0.7×正文长度 + 300（输出上限）
+FIXED_PROMPT_TOKENS = 300
+CHINESE_TOKENS_PER_CHAR = 0.7
+CONSERVATIVE_OUTPUT_TOKENS = 300
+
+
+def conservative_tokens_per_call(body_chars: int) -> int:
+    """按正文长度给出单条评论的**保守估算上界**（token）。
+
+    这是**上界**，不是"真实最坏情况"——真最坏情况无法在不做全量真实调用的前提下确定。
+    它的用途是回答："如果长评论真的比短评论贵得多，我最多会花多少。"
+    """
+    body = max(0, int(body_chars or 0))
+    return FIXED_PROMPT_TOKENS + int(round(body * CHINESE_TOKENS_PER_CHAR)) + CONSERVATIVE_OUTPUT_TOKENS
+
+
+def conservative_tokens_per_call_weighted(buckets: Sequence[Sequence[int]]) -> float:
+    """按**真实正文长度分布**加权，给出保守口径的"平均单条 token 上界"。
+
+    :param buckets: `[(条数, 该桶平均正文长度), ...]`，取自 `LENGTH_BUCKET_SQL`。
+    """
+    total = sum(int(n) for n, _ in buckets)
+    if total <= 0:
+        return float(conservative_tokens_per_call(0))
+    weighted = sum(int(n) * conservative_tokens_per_call(int(chars)) for n, chars in buckets)
+    return weighted / total
 
 # 景点评价（C-BAT-07）单次调用的 token 估算。
 #
@@ -71,6 +140,8 @@ class Preflight:
     layering: dict[str, int] = field(default_factory=dict)
     core_tables: list[dict[str, Any]] = field(default_factory=list)
     cost: dict[str, Any] = field(default_factory=dict)
+    # 待处理评论的正文长度分桶 `[{bucket, n, avg_chars}, ...]`（成本校准证据）
+    length_buckets: list[dict[str, Any]] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)      # 阻断项（BLOCKED）
     warnings: list[str] = field(default_factory=list)    # 提示项（不阻断，但必须知情）
 
@@ -87,6 +158,7 @@ class Preflight:
             "layering": self.layering,
             "core_tables": self.core_tables,
             "cost": self.cost,
+            "length_buckets": self.length_buckets,
             "issues": self.issues,
             "warnings": self.warnings,
             "status": self.status,
@@ -167,7 +239,56 @@ SQL = {
          WHERE s.has_full_evaluation = 1
            AND NOT EXISTS (SELECT 1 FROM spot_report sr WHERE sr.spot_id = s.spot_id)
     """,
+    # ---- 成本校准证据（只读）------------------------------------------------
+    # 现存真实 usage 的条数/最小/最大/合计。这几个数**必须**能被 SQL 直接复核，
+    # 因为 `MEASURED_TOKENS_PER_CALL_MIN/MAX` 就是按它们定的（见文件顶部说明）。
+    "usage_rows": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
+                  "AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+    "usage_min_tokens": "SELECT COALESCE(MIN(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
+                        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+    "usage_max_tokens": "SELECT COALESCE(MAX(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
+                        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+    "usage_sum_tokens": "SELECT COALESCE(SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
+                        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
 }
+
+# 待处理"调用层"评论的正文长度分桶（只读）。
+# 为什么需要它：单条 token 与正文长度正相关，而实测样本正文极短（最长 126 字），
+# 待处理集合里却有 5,637 条 >126 字（最长 1,829 字）。只有拿到**真实长度分布**，
+# 才能给出"长评论会把成本推高多少"的可解释上界，而不是继续用一个短样本的最大值。
+LENGTH_BUCKET_SQL = """
+    SELECT bucket, COUNT(*) AS n, ROUND(AVG(body_chars), 1) AS avg_chars
+      FROM (
+        SELECT CASE
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 20  THEN '01: <=20'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 40  THEN '02: 21-40'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 60  THEN '03: 41-60'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 80  THEN '04: 61-80'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 100 THEN '05: 81-100'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 150 THEN '06: 101-150'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 200 THEN '07: 151-200'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 300 THEN '08: 201-300'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 500 THEN '09: 301-500'
+                 WHEN CHAR_LENGTH(TRIM(r.content)) <= 1000 THEN '10: 501-1000'
+                 ELSE '11: >1000'
+               END AS bucket,
+               CHAR_LENGTH(TRIM(r.content)) AS body_chars
+          FROM review r
+         WHERE r.is_low_info = 0
+           AND (r.is_dup_content = 0 OR r.comment_id IN (
+                 SELECT g.comment_id FROM (
+                     SELECT comment_id, dup_group_id,
+                            ROW_NUMBER() OVER (PARTITION BY dup_group_id
+                                ORDER BY is_low_info ASC, content_length DESC, comment_id ASC) AS rn
+                       FROM review WHERE is_dup_content = 1 AND dup_group_id IS NOT NULL) g
+                  WHERE g.rn = 1))
+           AND r.content IS NOT NULL AND TRIM(r.content) <> ''
+           AND NOT EXISTS (SELECT 1 FROM sentiment se
+                            WHERE se.comment_id = r.comment_id AND se.method = 'deepseek')
+      ) t
+     GROUP BY bucket
+     ORDER BY bucket
+"""
 
 INTEGRITY_SQL = {
     "sentiment_dup_keys": "SELECT COUNT(*) FROM (SELECT comment_id FROM sentiment "
@@ -352,6 +473,16 @@ def collect() -> Preflight:
     tokens_max = MEASURED_TOKENS_PER_CALL_MAX
     tokens_mid = MEASURED_TOKENS_PER_CALL
 
+    # 待处理评论的正文长度分布（成本校准证据；只读）
+    result.length_buckets = query_all(LENGTH_BUCKET_SQL)
+    buckets = [
+        (int(row.get("n") or 0), float(row.get("avg_chars") or 0))
+        for row in result.length_buckets
+    ]
+    weighted_conservative = conservative_tokens_per_call_weighted(buckets)
+    # 绝对上界：分桶里最长的正文长度（用于给出"最长那一条"的单价上限）
+    max_body_chars = int(max((row.get("avg_chars") or 0) for row in result.length_buckets)) if result.length_buckets else 0
+
     report_cost = estimate_report_cost(report_pending)
     result.workload = {
         "comment_api_calls": call_pending,
@@ -366,22 +497,52 @@ def collect() -> Preflight:
     # 答辩时被人当场按计算器质疑"加不起来"是完全可以避免的。
     comment_min = round(estimate_cost(call_pending, tokens_min), 2)
     comment_max = round(estimate_cost(call_pending, tokens_max), 2)
+    # 「保守估算上界」：按真实正文长度分布加权，而不是假设所有评论都只有样本那么短。
+    # 这是本轮为解决"上界 562 被库内 600 突破"而新增的口径，也是最该拿来做预算的数。
+    comment_conservative = round(estimate_cost(call_pending, weighted_conservative), 2)
     report_cost_rounded = round(report_cost, 2)
     result.cost = {
         "tokens_per_call_measured": tokens_mid,
         "comment_cost_min_cny": comment_min,
         "comment_cost_max_cny": comment_max,
+        "comment_cost_conservative_cny": comment_conservative,
         "spot_report_cost_cny": report_cost_rounded,
         "total_cost_min_cny": round(comment_min + report_cost_rounded, 2),
         "total_cost_max_cny": round(comment_max + report_cost_rounded, 2),
-        # 【口径说明】上面两个数是"**一次成功、无重试**"的估算。
+        "total_cost_conservative_cny": round(comment_conservative + report_cost_rounded, 2),
+        # 校准证据：让"这几个数凭什么"可以直接被复核
+        "calibration": {
+            "usage_rows": result.counts.get("usage_rows", 0),
+            "usage_min_tokens": result.counts.get("usage_min_tokens", 0),
+            "usage_max_tokens": result.counts.get("usage_max_tokens", 0),
+            "usage_sum_tokens": result.counts.get("usage_sum_tokens", 0),
+            "pending_length_buckets": [
+                {"bucket": row.get("bucket"), "n": int(row.get("n") or 0),
+                 "avg_chars": float(row.get("avg_chars") or 0)}
+                for row in result.length_buckets
+            ],
+            "longer_than_sample_max_chars": sum(
+                int(row.get("n") or 0)
+                for row in result.length_buckets
+                # 按桶名精确判断，而不是用桶平均值——"101-150" 这个跨 126 边界的桶必须落在"未覆盖"一侧
+                if _bucket_of_chars(SAMPLE_MAX_BODY_CHARS) < str(row.get("bucket") or "")
+            ),
+            "sample_max_body_chars": SAMPLE_MAX_BODY_CHARS,
+            "conservative_tokens_per_call_weighted": round(weighted_conservative, 1),
+            "conservative_tokens_per_call_max_body": conservative_tokens_per_call(max_body_chars),
+            "basis": (
+                "保守上界 = 300（固定 prompt，实测最短正文的 prompt_tokens 304–312）"
+                f" + 0.7×正文长度（中文 token/字，保守取值） + 300（输出上限，实测 88–232、max_tokens=512）"
+            ),
+        },
+        # 【口径说明】上面三个数是"**一次成功、无重试**"的估算。
         # 客户端对网络错误/5xx/限流会**重试**（`--max-retry` 默认 2），重试是**额外计费**的。
-        # 32 次实测里 attempts == requests（0 次重试），因此这里没有可用的重试率来加权；
-        # 与其用猜的比例去"修正"，不如**把这条风险讲清楚**，让读者知道区间可能被突破。
+        # 实测 32 次里 attempts == requests（0 次重试），因此这里没有可用的重试率来加权；
+        # 与其用猜的比例去"修正"，不如**把这条风险讲清楚**，让读者知道实际可能高于估算。
         "retry_note": (
-            "以上为『一次成功、无重试』估算。网络错误/5xx/限流会自动重试且**重试同样计费**"
+            "以上均为『一次成功、无重试』估算。网络错误/5xx/限流会自动重试且**重试同样计费**"
             "（--max-retry 默认 2）。每次重试约使该次调用成本翻倍；"
-            "实测 32 次为 0 重试，故未计入——若运行中出现较多重试，实际费用会**高于上限**。"
+            "实测 32 次为 0 重试，故未计入——若运行中出现较多重试，实际费用会**高于以上数字**。"
         ),
     }
 
@@ -551,7 +712,7 @@ def print_report(preflight: Preflight | None = None) -> dict[str, Any]:
     print(f"  事实包 spot_fact_package : {counts['fact_package_done']} 行（C-BAT-06，零 API）")
     print(f"  评价 spot_report         : {counts['report_done']} 行 / 待生成 {counts['report_pending']} 行")
 
-    print("\n[4] 预计工作量与费用（按 32 次实测口径：{0} token/条，区间 {1}–{2}）".format(
+    print("\n[4] 预计工作量与费用（库内实测口径：均值 {0}、已观察区间 {1}–{2} token/条）".format(
         cost["tokens_per_call_measured"], MEASURED_TOKENS_PER_CALL_MIN, MEASURED_TOKENS_PER_CALL_MAX
     ))
     print(f"  评论级 API 次数        : {workload['comment_api_calls']}")
@@ -562,6 +723,18 @@ def print_report(preflight: Preflight | None = None) -> dict[str, Any]:
           f" + 景点级 ¥{cost['spot_report_cost_cny']}"
           f" = 合计 ¥{cost['total_cost_min_cny']}–{cost['total_cost_max_cny']}"
           f"（按 1 次成功、无重试估算）")
+    print(f"  ★ 保守估算上界         : 合计 ¥{cost['total_cost_conservative_cny']}"
+          f"（评论级 ¥{cost['comment_cost_conservative_cny']} + 景点级 ¥{cost['spot_report_cost_cny']}）"
+          f"——按正文长度分布加权，比区间上限更值得用来判断预算")
+    cal = cost.get("calibration") or {}
+    if cal:
+        print(f"  校准证据               : 库内可复核 usage {cal['usage_rows']} 条"
+              f"（最小 {cal['usage_min_tokens']} / 最大 {cal['usage_max_tokens']} / 合计 {cal['usage_sum_tokens']} token）")
+        print(f"                          待处理正文长度**超出样本覆盖范围**（>{cal.get('sample_max_body_chars', 126)} 字，"
+              f"即样本最长正文）的有 {cal['longer_than_sample_max_chars']} 条；"
+              f"加权保守口径 {cal['conservative_tokens_per_call_weighted']} token/条")
+        print(f"                          最长正文单条上界 {cal['conservative_tokens_per_call_max_body']} token；"
+              f"依据：{cal['basis']}")
     if cost.get("retry_note"):
         print(f"  费用口径说明           : {cost['retry_note']}")
 
@@ -606,5 +779,19 @@ __all__ = [
     "print_report",
     "core_table_checks",
     "estimate_cost",
+    "estimate_report_cost",
+    "conservative_tokens_per_call",
+    "conservative_tokens_per_call_weighted",
     "CORE_TABLE_BASELINE",
+    "LENGTH_BUCKET_SQL",
+    "MEASURED_TOKENS_PER_CALL",
+    "MEASURED_TOKENS_PER_CALL_MIN",
+    "MEASURED_TOKENS_PER_CALL_MAX",
+    "FIXED_PROMPT_TOKENS",
+    "CHINESE_TOKENS_PER_CHAR",
+    "CONSERVATIVE_OUTPUT_TOKENS",
+    "INPUT_SHARE",
+    "OUTPUT_SHARE",
+    "REPORT_INPUT_TOKENS",
+    "REPORT_OUTPUT_TOKENS",
 ]

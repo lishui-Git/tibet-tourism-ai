@@ -71,6 +71,73 @@ def main() -> int:
           round((measured_in + measured_out) / 32) == MEASURED_TOKENS_PER_CALL,
           f"{(measured_in + measured_out) / 32:.1f}")
 
+    # ---------- ①b 区间上下界必须锚在"库内可复核样本"上 ----------
+    # 为什么单独查库：均值 480 来自 32 次**进程统计**（只有 8 条落库），
+    # 而 min/max 必须是任何人都能用只读 SQL 复核的数。若这里失败，
+    # 说明库内已经跑出比模型更大的 token —— 必须重新校准，而不是让模型悄悄漂移。
+    print("\n[1b] 区间上下界与库内可复核 usage 对齐（关键：上界不得被真实数据突破）")
+    from app.db import query_all as _q_all
+
+    usage_rows = _q_all(
+        "SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED) AS tt "
+        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL"
+    )
+    toks = sorted(int(r["tt"]) for r in usage_rows if r.get("tt") is not None)
+    if toks:
+        print(f"      · 库内可复核 usage {len(toks)} 条：最小 {toks[0]} / 最大 {toks[-1]} / 合计 {sum(toks)}")
+        check(f"配置的下界 ≤ 库内实测最小（{toks[0]}）",
+              MEASURED_TOKENS_PER_CALL_MIN <= toks[0],
+              f"配置 {MEASURED_TOKENS_PER_CALL_MIN} vs 实测 {toks[0]}（必须 ≤ 实测，否则低估最低花费）")
+        check(f"配置的上界 ≥ 库内实测最大（{toks[-1]}）——**不得被真实数据突破**",
+              MEASURED_TOKENS_PER_CALL_MAX >= toks[-1],
+              f"配置 {MEASURED_TOKENS_PER_CALL_MAX} vs 实测 {toks[-1]}（必须 ≥ 实测，否则低估最坏花费）")
+    else:
+        check("库内存在可复核的 usage 样本（否则区间无从校准）", False, "未读到任何 usage")
+
+    # ---------- ①c 长评论的保守估算上界 ----------
+    # 旧模型的上界(=562)只是"那次 32 条样本内的最大值"，样本正文极短（最长 126 字），
+    # 而待处理里有数千条远超这个长度。这一组断言保证"长评论会把成本推高多少"有明确答案。
+    print("\n[1c] 长评论保守估算上界（解释性 + 必须高于已观察最大值）")
+    from app.llm.preflight import (
+        CHINESE_TOKENS_PER_CHAR,
+        CONSERVATIVE_OUTPUT_TOKENS,
+        FIXED_PROMPT_TOKENS,
+        conservative_tokens_per_call,
+        conservative_tokens_per_call_weighted,
+    )
+
+    check("保守上界公式的固定 prompt 与实测相符（实测最短正文 prompt_tokens 304–312）",
+          295 <= FIXED_PROMPT_TOKENS <= 320, f"配置 {FIXED_PROMPT_TOKENS}")
+    check("正文系数偏保守（中文常见 0.65，取 ≥0.65）",
+          CHINESE_TOKENS_PER_CHAR >= 0.65, f"配置 {CHINESE_TOKENS_PER_CHAR}")
+    check("输出按上限估算而非中位数（实测输出中位约 100）",
+          CONSERVATIVE_OUTPUT_TOKENS >= 200, f"配置 {CONSERVATIVE_OUTPUT_TOKENS}")
+    check("保守上界随正文长度单调不减",
+          all(conservative_tokens_per_call(a) <= conservative_tokens_per_call(b)
+              for a, b in ((0, 10), (10, 126), (126, 500), (500, 1829))),
+          f"126 字 {conservative_tokens_per_call(126)}；1829 字 {conservative_tokens_per_call(1829)}")
+    check("保守上界(126 字) 不低于库内那条 600 token 的真实观测",
+          conservative_tokens_per_call(126) >= max(toks or [0]),
+          f"公式给出 {conservative_tokens_per_call(126)} vs 实测最大 {max(toks or [0])}")
+
+    pf_len = collect()
+    weighted = conservative_tokens_per_call_weighted(
+        [(int(r.get("n") or 0), float(r.get("avg_chars") or 0)) for r in pf_len.length_buckets]
+    )
+    print(f"      · 按真实正文长度分布加权的保守口径：{weighted:.1f} token/条")
+    check("加权保守口径 ≥ 已观察最大值（即按分布算出来的单条上界不低于任何真实观测）",
+          weighted >= max(toks or [0]), f"{weighted:.1f} vs {max(toks or [0])}")
+    check("加权保守口径 ≥ 实测均值 480（长评论确实把单条成本推高了）",
+          weighted >= MEASURED_TOKENS_PER_CALL, f"{weighted:.1f} vs {MEASURED_TOKENS_PER_CALL}")
+    check("保守估算上界 ≥ 区间上限（三档必须递增：最低 ≤ 最高 ≤ 保守上界）",
+          pf_len.cost["total_cost_conservative_cny"] >= pf_len.cost["total_cost_max_cny"],
+          f"保守 {pf_len.cost['total_cost_conservative_cny']} vs 上限 {pf_len.cost['total_cost_max_cny']}")
+    check("保守上界不是靠「所有评论都按最长正文」堆出来的（应低于极端口径）",
+          conservative_tokens_per_call_weighted(
+              [(int(r.get("n") or 0), float(r.get("avg_chars") or 0)) for r in pf_len.length_buckets]
+          ) < conservative_tokens_per_call(1829),
+          "加权值 < 最长正文单条上界，说明它反映了真实分布")
+
     # 单价：¥2/M 输入、¥8/M 输出 ⇒ 480 token（73:27）单条约 ¥0.00174
     per_call = estimate_cost(1, MEASURED_TOKENS_PER_CALL)
     check("单条评论级成本可复算（≈¥0.0017）", 0.0015 < per_call < 0.0020, f"¥{per_call:.5f}")
@@ -137,16 +204,32 @@ def main() -> int:
           abs(expect_max - pf.cost["total_cost_max_cny"]) < 0.05,
           f"复算 {expect_max} vs 报告 {pf.cost['total_cost_max_cny']}")
     check("区间非空且上限 > 下限", pf.cost["total_cost_max_cny"] > pf.cost["total_cost_min_cny"], "")
-    check(f"已知余额（约 ¥57）低于估算下限（¥{pf.cost['total_cost_min_cny']}）——"
-          "这正是『余额不足、不能全量』的判断依据",
-          57 < pf.cost["total_cost_min_cny"], "")
+
+    # 预算覆盖判断：以**保守估算上界**为准，而不是被低估的区间上限。
+    # 为什么这条要测：原先这条写死了"余额约 ¥57 低于下限"，随着余额变化它会变成
+    # 一条永远为真的死断言。现在改成"给定余额 → 是否被保守上界覆盖"的纯函数。
+    def budget_verdict(balance: float, cost: dict) -> str:
+        if balance < cost["total_cost_min_cny"]:
+            return "BLOCKED"
+        if balance < cost["total_cost_conservative_cny"]:
+            return "READY_WITH_RISK"
+        return "READY"
+
+    conservative = pf.cost["total_cost_conservative_cny"]
+    check("预算判断：余额低于最低估算 → BLOCKED（示例 ¥30）",
+          budget_verdict(30.0, pf.cost) == "BLOCKED", f"¥30 vs 最低 ¥{pf.cost['total_cost_min_cny']}")
+    check("预算判断：余额在最低与保守上界之间 → READY_WITH_RISK（示例：保守上界 −¥1）",
+          budget_verdict(conservative - 1, pf.cost) == "READY_WITH_RISK", f"vs 保守 ¥{conservative}")
+    check(f"预算判断：当前余额 ¥133 覆盖保守上界（¥{conservative}）",
+          budget_verdict(133.0, pf.cost) == "READY",
+          f"余量 ¥{round(133.0 - conservative, 2)}")
 
     # ---------- ④ 重试不免费：必须讲清"区间可能被突破" ----------
     print("\n[4] 重试费用口径（估算不含重试，必须显式说明）")
     note = pf.cost.get("retry_note") or ""
     check("预检给出了重试口径说明", bool(note), note[:56])
     check("说明里点明『重试同样计费』", "重试同样计费" in note or "重试" in note, "")
-    check("说明里点明『实际费用可能高于上限』", "高于上限" in note, "")
+    check("说明里点明『实际费用会高于以上数字』", "高于以上数字" in note, "")
     check("说明里给出实测重试次数（0 次）作为依据", "0 重试" in note or "32 次" in note, "")
 
     # 客户端确实会重试（否则这条说明就是多余的）

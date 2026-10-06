@@ -37,7 +37,7 @@ from app.batch.task_registry import TaskRecorder, chunked, finish_task, register
 from app.batch.write_recovery import persist_recovery
 from app.config import PROJECT_ROOT
 from app.db import DatabaseError, connection, query_all, query_one
-from app.llm.client import CallStats, ChatClient, LlmError
+from app.llm.client import CallStats, ChatClient, ChatResult, LlmError
 from app.llm.prompts import (
     SEMANTIC_PROMPT_VERSION,
     build_semantic_messages,
@@ -293,11 +293,53 @@ def _build_reuse_raw(rep_id: int) -> dict[str, Any]:
     }
 
 
+def merge_call_results(first: ChatResult, second: ChatResult) -> tuple[ChatResult, list[dict[str, int]]]:
+    """把"首次调用"与"修复轮调用"两次真实请求合并成一个 `ChatResult`。
+
+    ## 为什么必须合并（本轮修掉的真实缺陷）
+    修复轮是**第二次真实 API 请求，同样计费**。但原实现里：
+
+        stats.record_success(response)                    # 只记首次
+        _build_api_record(row, result, response.usage)    # 只写首次
+
+    修复轮返回的 `retry.usage` **被直接丢弃**——既没进 `CallStats` 的费用统计，
+    也没写进 `raw_json.usage`。后果是"事后按库核对费用"会**少算一次调用**，
+    与"费用必须可复核"的要求相矛盾（详见 `app/llm/README.md` §7.2）。
+
+    ## 合并口径（保持既有读取逻辑兼容）
+    · `usage` 仍是**同样三个键**（prompt/completion/total），值为两次之和
+      —— 已有读取方（`CallStats`、费用换算、文档口径）无需改动；
+    · `attempts` 取两次之和，这样 `CallStats.retry_count = attempts − requests`
+      仍等于"真实 HTTP 请求次数 − 逻辑评论条数"，把修复轮这次额外请求算进去；
+    · `content` 取**最终成功**的那次（修复轮）内容，业务语义不变；
+    · 返回的明细列表用于写入 `raw_json.usage_calls`，便于事后看到"钱花在哪两次上"。
+
+    :returns: `(合并后的 ChatResult, 逐次调用明细列表)`
+    """
+    merged_usage = {
+        key: int(first.usage.get(key) or 0) + int(second.usage.get(key) or 0)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+    }
+    breakdown = [
+        {"call": "first", **{k: int(v or 0) for k, v in first.usage.items()}},
+        {"call": "repair", **{k: int(v or 0) for k, v in second.usage.items()}},
+    ]
+    merged = ChatResult(
+        content=second.content,
+        model=second.model,
+        usage=merged_usage,
+        latency_ms=int(first.latency_ms or 0) + int(second.latency_ms or 0),
+        attempts=int(first.attempts or 0) + int(second.attempts or 0),
+    )
+    return merged, breakdown
+
+
 def _build_api_record(
     row: dict,
     result: SemanticResult,
     usage: dict[str, int] | None = None,
     mode: str = "real",
+    usage_calls: list[dict[str, int]] | None = None,
 ) -> dict[str, Any]:
     """把一次成功的模型调用结果整理成待写库记录。
 
@@ -323,6 +365,13 @@ def _build_api_record(
     }
     if usage:
         raw["usage"] = {k: int(v or 0) for k, v in usage.items()}
+    # 发生修复轮时，额外记录"这一条评论的 token 花在哪几次调用上"。
+    # `usage` 本身已是两次之和（向后兼容），此处只是明细，读取方可以完全忽略它。
+    if usage_calls and len(usage_calls) > 1:
+        raw["usage_calls"] = [
+            {"call": str(item.get("call", "")), **{k: int(v or 0) for k, v in item.items() if k != "call"}}
+            for item in usage_calls
+        ]
     return {
         "comment_id": row["comment_id"],
         "spot_id": row["spot_id"],
@@ -381,7 +430,11 @@ def call_batch(
         return records, failures
 
     def worker(row: dict):
-        """返回 (行, ChatResult, 校验结果, 失败类别, 失败原因)。"""
+        """返回 (行, ChatResult, 校验结果, 失败类别, 失败原因)。
+
+        `ChatResult` 在**发生过修复轮**时是"两次调用合并后"的结果（见 `merge_call_results`），
+        这样调用方的 `record_success` 与 `raw_json.usage` 都会覆盖修复轮的真实花费。
+        """
         try:
             messages = build_semantic_messages(row["spot_name"], row["content"])
             response = client.chat(messages, temperature=TEMPERATURE, max_tokens=MAX_TOKENS)
@@ -397,26 +450,34 @@ def call_batch(
                 except ValidationError as exc2:
                     raise ValidationError(f"修复轮仍失败：{exc2}") from exc2
                 result.repairs.append(f"首次校验失败后修复成功：{exc}")
-                return row, retry, result, None, ""
-            return row, response, result, None, ""
+                # 修复轮是第二次**真实且计费**的请求：把两次 usage 合并后再上报，
+                # 否则这次花费会在 CallStats 与 raw_json 里双双消失。
+                merged, breakdown = merge_call_results(response, retry)
+                return row, merged, result, None, "", breakdown
+            return row, response, result, None, "", None
         except LlmError as exc:
-            return row, None, None, exc.kind, str(exc)
+            return row, None, None, exc.kind, str(exc), None
         except ValidationError as exc:
-            return row, None, None, "validation", str(exc)
+            return row, None, None, "validation", str(exc), None
         except Exception as exc:  # 兜底：任何未预期异常都不得终止整批
-            return row, None, None, "unexpected", f"{type(exc).__name__}: {exc}"
+            return row, None, None, "unexpected", f"{type(exc).__name__}: {exc}", None
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(worker, row) for row in rows]
         for future in as_completed(futures):
-            row, response, result, kind, reason = future.result()
+            row, response, result, kind, reason, breakdown = future.result()
             if result is None:
                 stats.record_failure(attempts=1, kind=kind or "unknown")
                 failures.append((row, kind or "unknown", reason))
                 continue
             if response is not None:
                 stats.record_success(response)
-            records.append(_build_api_record(row, result, response.usage if response else None, mode=mode))
+            records.append(
+                _build_api_record(
+                    row, result, response.usage if response else None,
+                    mode=mode, usage_calls=breakdown,
+                )
+            )
     return records, failures
 
 

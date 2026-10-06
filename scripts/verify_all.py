@@ -48,6 +48,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("test_failure_fallback.py", "设计 §7.5 失败兜底（失败登记可补跑、不进分母、解读失败仍给数据）", False),
     ("test_report_regen.py", "接口 19 重新生成评价（在线只登记 / 离线 MockClient 强制重生成）", False),
     ("test_report_usage.py", "景点评价实际 usage 与费用（含修复轮累加；假客户端）", False),
+    ("test_repair_usage.py", "评论语义修复轮 usage（两次调用都计入 CallStats 与 raw_json；假客户端）", False),
     ("test_write_recovery.py", "写库失败兜底（注入写库失败 → 只重试写库、落盘待补，不重新调用模型）", False),
     ("test_replay.py", "恢复补写（已付费结果零成本写回库；成功后才删凭证）", False),
     ("test_fact_package.py", "事实包（C-BAT-06 零模型调用 + 幂等跳过 + 清理回基线）", False),
