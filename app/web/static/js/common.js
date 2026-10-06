@@ -173,11 +173,29 @@ window.addEventListener('resize', () => _charts.forEach(c => c.resize()));
 const CHART_COLORS = ['#0f5f6b', '#a2603a', '#2f7d4f', '#b06a12', '#b3352f', '#4a6fa5', '#6b7c93'];
 
 /* -----------------------------------------------------------------------------
-   返回顶部（全局）
+   装饰插画的兜底：任何插画加载失败都不能影响页面可用性
    -----------------------------------------------------------------------------
-   行为：顶部时隐藏 → 下滑超过阈值后淡入 → 平滑回到顶部。
-   阈值取 320px：小于一屏的一半，避免"稍微滚一下就冒出来"打扰阅读。
+   首页首屏与风景卡都用了自绘 SVG 插画。若文件缺失／被拦截，浏览器默认会显示
+   破损图标，很难看且影响"完成度"观感。这里统一处理：
+     · 隐藏失败的 <img>；
+     · 给容器加降级类，用主题渐变兜底；
+     · **文字与数据完全不受影响**（插画只是装饰）。
    -------------------------------------------------------------------------- */
+function _initArtFallback() {
+  document.querySelectorAll('img[data-art]').forEach(img => {
+    const degrade = () => {
+      img.style.display = 'none';
+      const box = img.closest('[data-art-box]') || img.parentElement;
+      if (box) box.classList.add('art-missing');
+    };
+    if (img.complete && img.naturalWidth === 0) degrade();   // 已在缓存里失败过
+    img.addEventListener('error', degrade);
+  });
+}
+
+/* -----------------------------------------------------------------------------
+   返回顶部（全局）
+   ----------------------------------------------------------------------------- */
 const BACK_TO_TOP_AT = 320;
 
 function _initBackToTop() {
@@ -244,6 +262,9 @@ window.UI = {
   },
 };
 
-document.addEventListener('DOMContentLoaded', _initBackToTop);
+document.addEventListener('DOMContentLoaded', () => {
+  _initBackToTop();
+  _initArtFallback();
+});
 
 

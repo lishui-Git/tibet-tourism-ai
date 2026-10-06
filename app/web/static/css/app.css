@@ -1,9 +1,13 @@
 /* =============================================================================
    西藏旅游景点智能评价与分析系统 —— 前台样式（原生 CSS，无构建链，设计 §10）
 
-   设计取向：**数据分析产品**的观感 —— 克制的配色、清晰的层级、充足的留白。
-   藏地气质只体现在一处：主色的**深青**（经幡蓝绿）与标题的**暖棕**点缀，
-   不做纹样堆砌、不用大面积渐变。
+   设计取向：**现代旅游数据分析平台**，带**克制的藏地视觉识别**。
+     · 主色取"高原天空与冰川湖"的藏蓝／深青（不是通用科技蓝）；
+     · 点缀色取"经幡五色"中最低调的一支：经幡黄与暖棕，**只用于强调**；
+     · 视觉识别来自**原创矢量插画**（雪山／冰川湖／布达拉宫／峡谷），
+       而不是满屏藏式花纹——目标是"旅游数据分析平台"，不是景区宣传站。
+
+   品牌色与语义色刻意分开：品牌色用于**强调与识别**，语义色只表达"好/警告/问题"。
 
    【兼容约束】下列类名被 `static/js/*.js` 动态生成依赖，**改名会白屏**：
      stat / stat-label / stat-value / stat-sub / stat-grid
@@ -15,32 +19,43 @@
    ============================================================================= */
 
 :root {
-  /* —— 中性色 —— */
-  --c-bg: #f4f6f8;
+  /* —— 中性色（带一点冷调，呼应雪域而非纯灰）—— */
+  --c-bg: #eef3f6;
+  --c-bg-deep: #e3ecf1;          /* 用于"分区背景"，避免全站都是白卡片 */
   --c-surface: #ffffff;
-  --c-surface-2: #f8fafb;
-  --c-line: #e2e8ee;
-  --c-line-strong: #ccd6e0;
-  --c-text: #1b2733;
-  --c-text-2: #46586b;
-  --c-muted: #7b8b9c;
+  --c-surface-2: #f6f9fb;
+  --c-surface-3: #eaf1f5;        /* 更实一档的表面，用于内嵌块 */
+  --c-line: #dde6ec;
+  --c-line-strong: #c3d2dd;
+  --c-text: #14212c;
+  --c-text-2: #3f5464;
+  --c-muted: #73879a;
 
-  /* —— 主色：经幡深青 —— */
-  --c-primary: #0f5f6b;
-  --c-primary-dark: #0a4650;
-  --c-primary-soft: #e7f1f2;
-  --c-accent: #a2603a;          /* 暖棕，仅用于标题点缀与强调数字 */
-  --c-ok: #2f7d4f;
-  --c-ok-soft: #e8f4ec;
-  --c-warn: #b06a12;
-  --c-warn-soft: #fdf3e3;
-  --c-bad: #b3352f;
-  --c-bad-soft: #fbedec;
+  /* —— 品牌色：高原天空 / 冰川湖的藏蓝—深青 —— */
+  --c-primary: #0d5570;          /* 主色：深藏蓝青 */
+  --c-primary-dark: #083d52;
+  --c-primary-light: #2b8fae;    /* 亮调，用于渐变与图表 */
+  --c-primary-soft: #e3eff4;
+  --c-primary-ink: #0a3346;      /* 极深，用于大面积色块与页脚 */
+
+  /* —— 强调色：经幡黄（低调的金黄，不是荧光） —— */
+  --c-accent: #b8802a;
+  --c-accent-soft: #fbf1df;
+  --c-accent-bright: #dfae4a;    /* 仅用于极小面积的高光点缀 */
+
+  /* —— 语义色：只表达状态，不承担品牌识别 —— */
+  --c-ok: #2c7a52;
+  --c-ok-soft: #e6f3ec;
+  --c-warn: #a9631a;
+  --c-warn-soft: #fbf0e0;
+  --c-bad: #ab3630;
+  --c-bad-soft: #fbeae8;
 
   /* —— 尺度 —— */
   --r-sm: 4px;
-  --r-md: 6px;
-  --r-lg: 10px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --r-xl: 20px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -48,8 +63,17 @@
   --sp-5: 24px;
   --sp-6: 32px;
   --sp-7: 48px;
-  --shadow-sm: 0 1px 2px rgba(24, 42, 58, .06);
-  --shadow-md: 0 2px 10px rgba(24, 42, 58, .08);
+  --sp-8: 64px;
+  --shadow-sm: 0 1px 2px rgba(16, 44, 63, .05);
+  --shadow-md: 0 4px 16px rgba(16, 44, 63, .08);
+  --shadow-lg: 0 12px 36px rgba(16, 44, 63, .14);
+
+  /* —— 经幡五色（仅用于极小的装饰细节：色带、点位、图例）—— */
+  --flag-blue: #2f6fa5;
+  --flag-white: #f4f7f9;
+  --flag-red: #b3352f;
+  --flag-green: #2c7a52;
+  --flag-yellow: #d9a227;
 
   --nav-h: 60px;
   --page-max: 1200px;
@@ -831,4 +855,382 @@ details.fold .fold-body > :first-child { margin-top: 0; }
   .topbar, #back-to-top, .mainnav { display: none !important; }
   body { padding-top: 0; }
   .card { box-shadow: none; border-color: #999; break-inside: avoid; }
+}
+
+/* =============================================================================
+   ★ 藏地视觉识别层（2026-10 视觉改版新增）
+   -----------------------------------------------------------------------------
+   这一层的目标：让"这是西藏旅游分析系统"在第一眼成立，同时**不牺牲数据可读性**。
+   手段（按"面积从小到大"控制，避免过度装饰）：
+     · 经幡**色带**：只做 3px 的分隔线，出现在导航、页脚、卡片顶部；
+     · **Hero 首屏**：原创雪山／布达拉宫插画 + 深色蒙版，承载标题与关键数字；
+     · **重点数字**：字号显著放大、加粗、用等宽数字（tabular-nums）对齐；
+     · **风景卡**：把插画用于景点展示，图片只服务视觉、不干扰数据；
+     · **分区背景**：深色与浅色交替，避免"一屏全是白卡片"。
+   ============================================================================= */
+
+/* 首屏插画缺失时的降级：保留深色底 + 轻微纹理感，文字对比度依然达标 */
+.hero.art-missing {
+  background:
+    radial-gradient(120% 90% at 82% 12%, rgba(43, 143, 174, .45) 0%, rgba(13, 85, 112, 0) 62%),
+    linear-gradient(160deg, #062338 0%, #0d3f5e 46%, #1d6a8c 100%);
+}
+.hero.art-missing .hero-art { display: none; }
+
+/* —— 经幡色带：3px 的五色渐变，作为全站的"视觉签名"（面积极小） —— */
+.flagline {
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--flag-blue) 0%, var(--flag-blue) 20%,
+    var(--flag-white) 20%, var(--flag-white) 40%,
+    var(--flag-red) 40%, var(--flag-red) 60%,
+    var(--flag-green) 60%, var(--flag-green) 80%,
+    var(--flag-yellow) 80%, var(--flag-yellow) 100%
+  );
+}
+
+/* 导航底部用一条收敛的色带（只保留主色系，避免导航过花） */
+.topbar { border-bottom: 0; }
+.topbar::after {
+  content: "";
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg,
+    var(--c-primary) 0%, var(--c-primary-light) 38%,
+    var(--c-accent-bright) 62%, var(--c-accent) 100%);
+  opacity: .85;
+}
+.topbar-inner { height: calc(var(--nav-h) - 2px); }
+
+/* 当前栏目用一条短色带标记（比整块底色更克制） */
+.mainnav a.active::after {
+  content: "";
+  position: absolute;
+  left: 12px; right: 12px; bottom: -2px;
+  height: 2px;
+  background: var(--c-primary);
+  border-radius: 2px;
+}
+
+/* —— Hero：首屏视觉展示区（插画 + 蒙版 + 文案 + 关键数字） —— */
+.hero {
+  position: relative;
+  border: 0;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  background: var(--c-primary-ink);
+  box-shadow: var(--shadow-lg);
+}
+.hero-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 插画本身已足够复杂，稍微降饱和让它"退后"，文案更清楚 */
+  filter: saturate(.92);
+}
+/* 蒙版：左深右浅——左侧保证文字对比度达标，右侧留出雪峰可见度 */
+.hero-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(100deg, rgba(6, 30, 45, .93) 0%, rgba(8, 45, 66, .74) 40%, rgba(10, 60, 84, .28) 74%, rgba(10, 60, 84, .12) 100%),
+    linear-gradient(180deg, rgba(6, 30, 45, .30) 0%, rgba(6, 30, 45, 0) 34%, rgba(6, 30, 45, .40) 100%);
+}
+.hero-inner {
+  position: relative;
+  padding: var(--sp-8) var(--sp-7) var(--sp-6);
+  color: #fff;
+}
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 12.5px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: #bfe0ea;
+  margin: 0 0 var(--sp-4);
+  padding: 5px 12px 5px 10px;
+  border: 1px solid rgba(191, 224, 234, .34);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .06);
+  backdrop-filter: blur(2px);
+}
+.hero-eyebrow::before {
+  content: "";
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  background: linear-gradient(135deg, var(--flag-yellow), var(--flag-red));
+}
+.hero h2 {
+  margin: 0 0 var(--sp-3);
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: .5px;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, .35);
+  max-width: 20ch;
+}
+.hero .hero-sub {
+  margin: 0 0 var(--sp-2);
+  max-width: 52ch;
+  font-size: 16.5px;
+  line-height: 1.85;
+  color: #e2eef2;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .3);
+}
+.hero .hero-scope {
+  margin: 0;
+  font-size: 13px;
+  color: #a9c8d4;
+}
+/* Hero 内的关键数字：白字大号 + 半透明分隔，直接落在插画上 */
+.hero-kpis {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: var(--sp-6) 0 0;
+  background: rgba(255, 255, 255, .16);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.hero-kpi {
+  padding: var(--sp-4) var(--sp-4) var(--sp-4);
+  background: rgba(7, 34, 50, .42);
+  backdrop-filter: blur(3px);
+}
+.hero-kpi .k-label {
+  display: block;
+  font-size: 12.5px;
+  color: #b7d3de;
+  margin-bottom: 2px;
+}
+.hero-kpi .k-value {
+  display: block;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.5px;
+}
+.hero-kpi .k-sub { display: block; font-size: 12px; color: #9dbccb; margin-top: 2px; }
+/* Hero 行动按钮：本页最高层级的按钮 */
+.hero-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-6) 0 0; }
+.btn-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 12px 26px;
+  font-size: 15.5px;
+  font-weight: 700;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: #fff;
+  color: var(--c-primary-dark);
+  text-decoration: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .22);
+  transition: transform .15s, box-shadow .15s, background .15s;
+}
+.btn-hero:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(0, 0, 0, .28); background: #f4fafc; }
+.btn-hero::after { content: "→"; font-weight: 700; }
+.btn-hero.ghost {
+  background: rgba(255, 255, 255, .10);
+  color: #eaf5f8;
+  border-color: rgba(255, 255, 255, .42);
+  box-shadow: none;
+}
+.btn-hero.ghost:hover { background: rgba(255, 255, 255, .18); }
+.btn-hero.ghost::after { content: ""; }
+/* 首屏底部经幡色带（视觉签名落在最重要的位置） */
+.hero .flagline { position: absolute; left: 0; right: 0; bottom: 0; opacity: .9; }
+
+/* —— 重点数字块（用于"核心数据"，比普通 stat 更醒目） —— */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-4);
+  margin: var(--sp-5) 0;
+}
+.kpi {
+  position: relative;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+/* 左侧强调条：让"重点"有视觉锚点，而不是四张一模一样的白卡片 */
+.kpi::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--c-primary), var(--c-primary-light));
+}
+.kpi.accent::before { background: linear-gradient(180deg, var(--c-accent), var(--c-accent-bright)); }
+.kpi .kpi-value {
+  display: block;
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  color: var(--c-primary);
+  font-variant-numeric: tabular-nums;
+}
+.kpi.accent .kpi-value { color: var(--c-accent); }
+.kpi .kpi-label {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.kpi .kpi-sub { display: block; font-size: 12.5px; color: var(--c-muted); margin-top: 2px; }
+
+/* —— 分区标题（"系统能做什么"这类）—— */
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+}
+.section-title h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: .2px; }
+.section-title .st-sub { font-size: 13.5px; color: var(--c-muted); }
+.section-title::before {
+  content: "";
+  width: 4px; height: 20px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--c-primary), var(--c-primary-light));
+  align-self: center;
+}
+
+/* —— 深色分区：与浅色分区交替，打破"满屏白卡片" —— */
+.band {
+  background: linear-gradient(180deg, var(--c-primary-ink) 0%, #0c4159 100%);
+  color: #e8f2f6;
+  border-radius: var(--r-xl);
+  padding: var(--sp-7) var(--sp-6);
+  box-shadow: var(--shadow-md);
+}
+.band .section-title h2 { color: #fff; }
+.band .section-title .st-sub { color: #a8c6d3; }
+.band .section-title::before { background: linear-gradient(180deg, var(--flag-yellow), var(--flag-red)); }
+.band .entry {
+  background: rgba(255, 255, 255, .07);
+  border-color: rgba(255, 255, 255, .18);
+  color: #eaf5f8;
+}
+.band .entry:hover { background: rgba(255, 255, 255, .13); border-color: rgba(255, 255, 255, .4); }
+.band .entry .entry-title { color: #fff; }
+.band .entry .entry-desc { color: #bdd6e0; }
+.band .entry .entry-more { color: var(--c-accent-bright); }
+
+/* —— 风景卡：插画 + 真实数据（图片服务视觉，不干扰数据） —— */
+.scenic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-4);
+  margin: var(--sp-4) 0 0;
+}
+.scenic {
+  position: relative;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+.scenic:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--c-primary-light); }
+.scenic-art { display: block; width: 100%; height: 138px; object-fit: cover; background: var(--c-surface-3); }
+/* 插画缺失时的降级：用主题渐变充当视觉底，卡片结构与数据完全不受影响 */
+.scenic-noart { background: linear-gradient(160deg, var(--c-primary) 0%, var(--c-primary-light) 100%); }
+.scenic-noart .scenic-name { color: #fff; }
+.scenic-noart .scenic-meta { color: #cfe4ec; }
+.scenic-noart .scenic-stat .v { color: #fff; }
+.scenic-noart .scenic-stat .l { color: #bcd8e3; }
+.scenic-noart .scenic-body { padding-top: var(--sp-5); }
+.scenic-body { padding: var(--sp-4) var(--sp-4) var(--sp-4); }
+.scenic-name { font-size: 16px; font-weight: 700; color: var(--c-text); margin: 0 0 2px; }
+.scenic-meta { font-size: 12.5px; color: var(--c-muted); margin: 0 0 var(--sp-3); }
+.scenic-stats { display: flex; gap: var(--sp-4); align-items: flex-end; }
+.scenic-stat .v {
+  display: block;
+  font-size: 19px; font-weight: 800; color: var(--c-primary);
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.scenic-stat .l { display: block; font-size: 11.5px; color: var(--c-muted); }
+.scenic-tag { position: absolute; top: var(--sp-3); left: var(--sp-3); }
+
+/* —— 榜单卡（热门景点，比表格更易读） —— */
+.rank-list { display: grid; gap: var(--sp-2); margin: var(--sp-4) 0 0; }
+.rank-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color .15s, background .15s, transform .15s;
+}
+.rank-row:hover { border-color: var(--c-primary-light); background: var(--c-primary-soft); transform: translateX(2px); }
+.rank-row .rk {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: var(--c-surface-3); color: var(--c-text-2);
+}
+.rank-row:nth-child(1) .rk { background: var(--c-accent); color: #fff; }
+.rank-row:nth-child(2) .rk { background: var(--c-primary-light); color: #fff; }
+.rank-row:nth-child(3) .rk { background: var(--c-primary); color: #fff; }
+.rank-row .rn { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-row .rv {
+  font-size: 15px; font-weight: 700; color: var(--c-primary);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.rank-row .rs { font-size: 12.5px; color: var(--c-muted); white-space: nowrap; }
+
+/* —— 响应式：Hero 与重点数字在窄屏必须重排，不能溢出 —— */
+@media (max-width: 900px) {
+  .hero-inner { padding: var(--sp-6) var(--sp-5) var(--sp-5); }
+  .hero h2 { font-size: 30px; max-width: none; }
+  .hero .hero-sub { font-size: 15px; }
+  .hero-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: var(--sp-5); }
+  .hero-kpi .k-value { font-size: 26px; }
+  .band { padding: var(--sp-6) var(--sp-5); border-radius: var(--r-lg); }
+  .kpi .kpi-value { font-size: 32px; }
+  .scenic-art { height: 124px; }
+}
+@media (max-width: 620px) {
+  .hero { border-radius: var(--r-lg); }
+  .hero-inner { padding: var(--sp-5) var(--sp-4) var(--sp-4); }
+  .hero h2 { font-size: 24px; }
+  .hero-eyebrow { font-size: 11px; letter-spacing: .1em; }
+  .hero-actions { gap: var(--sp-2); }
+  .btn-hero { padding: 11px 18px; font-size: 14.5px; width: 100%; justify-content: center; }
+  .hero-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-kpi { padding: var(--sp-3); }
+  .hero-kpi .k-value { font-size: 22px; }
+  .hero-kpi .k-sub { display: none; }
+  .kpi { padding: var(--sp-4); }
+  .kpi .kpi-value { font-size: 28px; }
+  .rank-row { grid-template-columns: 28px 1fr auto; gap: var(--sp-3); }
+  .rank-row .rs { display: none; }
+  .scenic-grid { grid-template-columns: 1fr; }
 }

@@ -1,34 +1,61 @@
 {% extends "base.html" %}
 {% block title %}首页 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}基于游客评论的离线智能分析平台{% endblock %}
+{% block subtitle %}把 5.9 万条游客评论变成可读的景点评价{% endblock %}
 
 {% block content %}
 
-{# 首屏：先说清"这个系统能做什么"，实现细节一律降到页面底部折叠区 #}
-<section class="hero">
-  <h2>西藏旅游景点智能评价与分析系统</h2>
-  <p class="hero-sub">
-    汇集西藏及进藏沿线 <strong>837</strong> 个景点的游客评论，从评论中提炼评分分布、
-    情感倾向、游客关注点与不足之处，帮助你了解每个景点"游客到底怎么说"。
-  </p>
-  <p class="hero-scope">
-    覆盖范围：西藏及进藏沿线（川藏／滇藏／青藏线）· 全部结论均来自真实评论数据
-  </p>
+{#
+  首屏 Hero
+  ============================================================================
+  背景是**原创矢量插画**（雪山／冰川湖／布达拉宫剪影），不是下载的照片——
+  版权干净、体积极小、放多大都清晰。
+  文字压在深色蒙版上，保证对比度：这里承载"系统是什么"和四个关键数字。
+#}
+<section class="hero" data-art-box>
+  <img class="hero-art" src="{{ url_for('static', filename='img/tibet-hero.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="hero-veil" aria-hidden="true"></div>
+
+  <div class="hero-inner">
+    <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
+    <h2>读懂每一条游客评论，看清每个景点的真实口碑</h2>
+    <p class="hero-sub">
+      汇集西藏及进藏沿线景点的游客评论，从评论中提炼评分分布、情感倾向、
+      游客关注点与不足之处，帮助旅行者与管理者了解每个景点"游客到底怎么说"。
+    </p>
+    <p class="hero-scope">覆盖范围：西藏及进藏沿线（川藏／滇藏／青藏线）· 全部结论均来自真实评论数据</p>
+
+    {# 关键数据直接落在首屏：数字由接口填充，不硬编码 #}
+    <div class="hero-kpis" id="hero-kpis">
+      <div class="hero-kpi"><span class="k-label">加载中…</span><span class="k-value">—</span></div>
+    </div>
+
+    <div class="hero-actions">
+      <a class="btn-hero" href="/overview">进入数据总览</a>
+      <a class="btn-hero ghost" href="/smart">直接看景点评价</a>
+    </div>
+  </div>
+  <div class="flagline" aria-hidden="true"></div>
 </section>
 
-{# 真实数据概况：全部来自 /api/overview/summary，不硬编码 #}
+{# 核心数据：比普通统计卡更醒目（左侧强调条 + 大号数字） #}
 <section class="card">
-  <h2>数据概况</h2>
-  <div id="home-stats" class="stat-grid">
-    <div class="stat"><span class="stat-label">加载中…</span></div>
+  <div class="section-title">
+    <h2>数据规模</h2>
+    <span class="st-sub">以下是本系统当前已收录并完成分析的数据量</span>
+  </div>
+  <div class="kpi-row" id="home-kpis">
+    <div class="kpi"><span class="kpi-value">—</span><span class="kpi-label">加载中…</span></div>
   </div>
   <p id="home-summary-note" class="hint"></p>
 </section>
 
-{# 四个核心功能入口 #}
-<section class="card">
-  <h2>开始使用</h2>
-  <p class="hint">从下面四个入口进入，无需登录。</p>
+{# 系统能做什么：深色分区，与上下的浅色卡片形成节奏 #}
+<section class="band">
+  <div class="section-title">
+    <h2>系统能做什么</h2>
+    <span class="st-sub">四个入口，无需登录</span>
+  </div>
   <div class="entries">
     <a class="entry" href="/overview">
       <div class="entry-title"><span class="idx">01</span>数据总览</div>
@@ -53,28 +80,47 @@
   </div>
 </section>
 
-{# 热门景点：真实排行，点击可直接进入该景点的智能评价 #}
+{#
+  西藏景点视觉展示
+  ============================================================================
+  插画为原创矢量图，只服务视觉；卡片上的数字全部来自真实统计接口。
+  若插画文件缺失或加载失败，`<img>` 会退化为卡片底色，布局不受影响。
+#}
 <section class="card">
-  <h2>评论量最高的景点</h2>
-  <p class="hint">数据来自当前评论统计，点击任意景点可查看它的评价与详细分析。</p>
-  <div id="home-hot" class="rank-mini">
+  <div class="section-title">
+    <h2>高原上的热门景点</h2>
+    <span class="st-sub">点击任意景点，查看它的评价与分析</span>
+  </div>
+  <div class="scenic-grid" id="home-scenic">
     <div class="hint">加载中…</div>
   </div>
 </section>
 
-{# 结果生产状态：如实说明哪些结果已经生成、哪些还没生成（不伪造） #}
+{# 热门景点榜单（评论量） #}
 <section class="card">
-  <h2>分析结果生成情况</h2>
-  <p class="hint">
-    分析结果由离线任务分批生成。尚未生成的部分，页面会明确显示"暂未生成"，
-    <strong>不会用估算值或示例内容代替</strong>。
-  </p>
+  <div class="section-title">
+    <h2>评论量排行</h2>
+    <span class="st-sub">游客讨论最多的景点</span>
+  </div>
+  <div class="rank-list" id="home-hot">
+    <div class="hint">加载中…</div>
+  </div>
+</section>
+
+{# 分析结果生成情况：如实说明哪些结果已经生成、哪些还没生成（不伪造） #}
+<section class="card">
+  <div class="section-title">
+    <h2>分析结果生成情况</h2>
+    <span class="st-sub">尚未生成的部分会明确说明，不会用估算值代替</span>
+  </div>
   <div id="home-coverage"></div>
 </section>
 
 {# 技术说明统一降到折叠区：普通用户不需要看，答辩时可展开 #}
 <section class="card">
-  <h2>关于本系统</h2>
+  <div class="section-title">
+    <h2>关于本系统</h2>
+  </div>
   <details class="fold">
     <summary>分析结果是怎么来的？为什么浏览页面不产生费用？</summary>
     <div class="fold-body">
@@ -97,6 +143,10 @@
         <div class="flow-arrow">→</div>
         <div class="flow-step"><b>④ 结果入库与查询</b><span>本平台只读展示</span></div>
       </div>
+      <p class="hint">
+        首页插画为系统自绘的矢量图（雪山、冰川湖、布达拉宫剪影），
+        用于呈现地域特征，不涉及第三方图片授权。
+      </p>
     </div>
   </details>
   <details class="fold">

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  原创矢量插画：纳木措（雪山 + 圣湖 + 经幡）
+  说明：全部为手写 SVG，无第三方素材、无版权依赖；约为照片体积的千分之一，秒开。
+  风格：写实取向的**渐变剪影**——用层次渐变与倒影表现"高原湖泊"的通透感，
+        而不是扁平图标，以便与全站的数据可视化基调一致。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" preserveAspectRatio="xMidYMid slice"
+     role="img" aria-label="纳木措：雪山与圣湖插画">
+  <defs>
+    <linearGradient id="nt-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a3a5c"/>
+      <stop offset="45%" stop-color="#2b7ba0"/>
+      <stop offset="100%" stop-color="#bcdde6"/>
+    </linearGradient>
+    <linearGradient id="nt-peak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#dbe9f0"/>
+      <stop offset="100%" stop-color="#93aec0"/>
+    </linearGradient>
+    <linearGradient id="nt-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#54809a"/>
+      <stop offset="100%" stop-color="#28546e"/>
+    </linearGradient>
+    <linearGradient id="nt-lake" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#57a8bd"/>
+      <stop offset="50%" stop-color="#247a9b"/>
+      <stop offset="100%" stop-color="#0f4f6d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="420" fill="url(#nt-sky)"/>
+
+  <!-- 远山 -->
+  <path d="M0 236 L96 168 L168 214 L268 138 L360 216 L432 176 L520 232 L600 190 L640 226 L640 420 L0 420 Z"
+        fill="#7fa6bc" opacity="0.6"/>
+  <!-- 主峰 -->
+  <path d="M0 300 L88 214 L156 268 L268 150 L376 262 L470 206 L570 292 L640 254 L640 420 L0 420 Z"
+        fill="url(#nt-body)"/>
+  <!-- 雪线 -->
+  <path d="M268 150 L376 262 L344 262 L312 216 L282 258 L242 258 Z" fill="url(#nt-peak)"/>
+  <path d="M88 214 L156 268 L132 268 L112 240 L92 264 L64 264 Z" fill="url(#nt-peak)"/>
+  <path d="M470 206 L570 292 L546 292 L516 250 L490 288 L446 288 Z" fill="#ffffff" opacity="0.8"/>
+
+  <!-- 湖面 -->
+  <path d="M0 312 L640 312 L640 420 L0 420 Z" fill="url(#nt-lake)"/>
+  <!-- 倒影 -->
+  <g opacity="0.22" fill="#eaf4f8">
+    <path d="M242 312 L312 312 L300 352 L254 352 Z"/>
+    <path d="M446 312 L516 312 L504 348 L458 348 Z"/>
+  </g>
+  <!-- 水纹 -->
+  <g fill="#ffffff" opacity="0.22">
+    <rect x="60"  y="344" width="120" height="3" rx="1.5"/>
+    <rect x="330" y="336" width="90"  height="3" rx="1.5"/>
+    <rect x="470" y="366" width="130" height="3" rx="1.5"/>
+    <rect x="150" y="384" width="160" height="3" rx="1.5"/>
+  </g>
+
+  <!-- 岸边经幡（少量点缀） -->
+  <g transform="translate(28 250)">
+    <path d="M0 62 L0 0" stroke="#e7e0d2" stroke-width="2"/>
+    <path d="M0 4 L86 30" stroke="#e7e0d2" stroke-width="1.4" opacity="0.9"/>
+    <rect x="10" y="6"  width="13" height="18" fill="#2f6fa5" opacity="0.94" transform="rotate(16 16 15)"/>
+    <rect x="38" y="15" width="13" height="18" fill="#f2f6f8" opacity="0.94" transform="rotate(16 44 24)"/>
+    <rect x="66" y="24" width="13" height="18" fill="#b3352f" opacity="0.94" transform="rotate(16 72 33)"/>
+  </g>
+</svg>

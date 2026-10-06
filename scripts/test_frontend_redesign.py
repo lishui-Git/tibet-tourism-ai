@@ -312,6 +312,144 @@ def main() -> int:
     check("不含景点名的排行类问题不误识别景点",
           match_spots("评论量前十的景点") == [], "")
 
+    # ---------- ⑰ 藏地视觉识别（2026-10 视觉改版） ----------
+    #
+    # 目标：让"这是西藏旅游分析系统"在第一眼成立。这里固定三件事：
+    #   ① 首屏 Hero 必须存在，且带**自绘矢量插画**（版权干净、不依赖外网）；
+    #   ② 关键数据必须落在首屏（用户不用滚动就知道系统规模）；
+    #   ③ 插画资源必须真实可访问（否则首页会出现破图）。
+    print("\n[17] 藏地视觉识别：首屏 Hero + 原创插画 + 关键数据")
+    home_html = htmls.get("/", "")
+    check("首页含首屏 Hero 区块", 'class="hero"' in home_html, "")
+    check("Hero 使用自绘矢量插画（非外链图片）",
+          "img/tibet-hero.svg" in home_html and "http" not in re.search(
+              r'<img class="hero-art"[^>]*>', home_html).group(0), "")
+    check("Hero 有深色蒙版保证文字对比度", 'class="hero-veil"' in home_html, "")
+    check("Hero 含关键数据容器（由接口填充）", 'id="hero-kpis"' in home_html, "")
+    check("Hero 含明确的进入按钮", 'class="btn-hero"' in home_html, "")
+
+    home_js = c.get("/static/js/home.js").get_data(as_text=True)
+    check("Hero 四个关键数字由接口渲染（非硬编码）",
+          "renderHeroKpis" in home_js and "/api/overview/summary" in home_js, "")
+    check("关键数字标签与设计要求一致",
+          all(k in home_js for k in ("游客评论", "覆盖景点", "有效评价", "可生成完整评价")), "")
+    check("有效评价取统计基线口径（47,110 对应的那一档）",
+          "mllib" in home_js and "baselineCount" in home_js, "")
+    check("首页含西藏景点视觉卡容器", 'id="home-scenic"' in home_html, "")
+    check("风景卡插画加载失败有降级处理（不影响数据展示）",
+          "data-scenic-art" in home_js and "scenic-noart" in c.get("/static/css/app.css").get_data(as_text=True), "")
+    check("首页不再以表格为主（榜单用列表卡而非表格）",
+          'class="rank-list"' in home_html and 'class="rank-row"' in home_js, "")
+
+    # ---------- ⑱ 插画资源可访问 + 版权自证 ----------
+    print("\n[18] 插画资源：可访问、自绘、体积可控")
+    svg_dir = ROOT / "app" / "web" / "static" / "img"
+    svgs = sorted(svg_dir.glob("*.svg"))
+    check("插画文件存在（≥5 个场景）", len(svgs) >= 5, f"{len(svgs)} 个")
+    bad_size, bad_xml = [], []
+    import xml.etree.ElementTree as _ET
+    for p in svgs:
+        if p.stat().st_size > 80_000:
+            bad_size.append(f"{p.name}({p.stat().st_size}B)")
+        try:
+            _ET.fromstring(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            bad_xml.append(f"{p.name}: {exc}")
+    check("插画全部为合法 XML/SVG", not bad_xml, "、".join(bad_xml) if bad_xml else "")
+    check("单个插画体积 < 80KB（不拖慢演示）", not bad_size, "、".join(bad_size) if bad_size else
+          "最大 " + str(max(p.stat().st_size for p in svgs)) + "B")
+    for p in svgs:
+        r = c.get(f"/static/img/{p.name}")
+        if r.status_code != 200:
+            check(f"{p.name} 可访问", False, f"HTTP {r.status_code}")
+    check("全部插画可通过静态路由访问", True, f"{len(svgs)} 个文件")
+    check("插画为原创自绘（文件头注明版权干净、无第三方素材）",
+          all("原创" in p.read_text(encoding="utf-8")[:900] for p in svgs), "")
+
+    # ---------- ⑲ 视觉体系：主题变量与"避免满屏白卡片" ----------
+    print("\n[19] 视觉体系：藏地主题色 + 分区层次")
+    check("定义经幡五色变量（少量点缀用）",
+          all(v in css for v in ("--flag-blue", "--flag-white", "--flag-red", "--flag-green", "--flag-yellow")), "")
+    check("主色为藏蓝／深青（非通用科技蓝）", "--c-primary:" in css and "--c-primary-ink:" in css, "")
+    check("存在深色分区样式（与浅色卡片交替）", ".band {" in css or ".band{" in css, "")
+    check("重点数字使用大字号 + 等宽数字对齐",
+          "kpi-value" in css and "tabular-nums" in css, "")
+    check("经幡色带作为全站视觉签名", ".flagline" in css and "flagline" in home_html, "")
+    check("导航有当前栏目高亮标记", ".mainnav a.active" in css, "")
+    check("图片/视频等装饰失败不影响布局（降级样式存在）", "scenic-noart" in css, "")
+
+    # ---------- ⑳ 插画兜底：首屏与风景卡都必须能"无图可用" ----------
+    print("\n[20] 插画兜底：加载失败时页面与数据不受影响")
+    check("首屏插画带兜底标记", "data-art" in home_html and "data-art-box" in home_html, "")
+    check("首屏有降级背景样式", ".hero.art-missing" in css, "")
+    common_js = c.get("/static/js/common.js").get_data(as_text=True)
+    check("公共脚本统一处理插画失败（img[data-art]）",
+          "_initArtFallback" in common_js and "img[data-art]" in common_js, "")
+    check("失败时隐藏图片并标记容器", "img.style.display = 'none'" in common_js
+          and "art-missing" in common_js, "")
+    check("已缓存的失败图片也会被处理（不只看 error 事件）",
+          "naturalWidth === 0" in common_js, "")
+    check("风景卡插画同样接入兜底", "data-scenic-art" in home_js, "")
+
+    # ---------- ㉑ 响应式结构：窄屏必须真的重排，而不只是"写了断点" ----------
+    #
+    # 仅仅存在 @media 并不代表会重排。这里检查**关键网格在窄屏确实改列数**：
+    # 重点数字从 4 列变 2 列、风景卡从多列变 1 列、榜单隐藏次要列。
+    # 实测（用固定宽度 iframe 渲染）：
+    #   1440 → hero 4 列 / 风景卡 4 列 / 导航单行
+    #   1024 → hero 4 列 / 风景卡 3 列
+    #    768 → hero 2 列 / 风景卡 2 列
+    #    500 → hero 2 列 / 风景卡 1 列 / 导航自身横向滚动
+    print("\n[21] 响应式结构：关键网格在窄屏确实重排")
+
+    def media_blocks(css_text: str, query: str) -> str:
+        """取出**所有**匹配该查询的 @media 块内容并拼起来。
+
+        为什么不能用 split 取第一个：视觉改版新增的样式层与基础层各写了一个
+        `@media (max-width: 900px)`（后者在文件更靠前的位置），
+        只取第一个会漏掉真正的重排规则——这是本测试自己踩过的坑。
+        """
+        chunks, start = [], 0
+        while True:
+            i = css_text.find(query, start)
+            if i < 0:
+                break
+            j = css_text.find("{", i)
+            if j < 0:
+                break
+            depth, k = 0, j
+            while k < len(css_text):
+                if css_text[k] == "{":
+                    depth += 1
+                elif css_text[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        chunks.append(css_text[j + 1:k])
+                        break
+                k += 1
+            start = k + 1
+        return "\n".join(chunks)
+
+    narrow = media_blocks(css, "@media (max-width: 900px)")
+    phone = media_blocks(css, "@media (max-width: 620px)")
+    check("成功解析出 900px 断点块", bool(narrow.strip()), f"{len(narrow)} 字符")
+    check("成功解析出 620px 断点块", bool(phone.strip()), f"{len(phone)} 字符")
+    check("900px 断点内重排首屏关键数字（4 列 → 2 列）",
+          ".hero-kpis" in narrow and "repeat(2" in narrow, "")
+    check("900px 断点内重排重点数字块", ".kpi-row" in narrow or ".kpi " in narrow or ".kpi{" in narrow, "")
+    check("620px 断点内风景卡改为单列", ".scenic-grid" in phone and "1fr" in phone, "")
+    check("620px 断点内榜单隐藏次要列（避免挤压）",
+          ".rank-row .rs" in phone and "display: none" in phone, "")
+    check("620px 断点内 Hero 标题降级字号", ".hero h2" in phone, "")
+    check("窄屏按钮改为整行（点击区域足够大）",
+          ".btn-hero" in phone and "width: 100%" in phone, "")
+    check("导航在窄屏改为自身横向滚动（不挤压品牌区）",
+          ".mainnav" in narrow and "overflow-x: auto" in narrow, "")
+    check("品牌区在窄屏保留最小宽度（系统名可见）",
+          "min-width: 132px" in narrow, "")
+    check("表格过宽时容器内滚动而不是撑破卡片",
+          "overflow-x: auto" in css, "")
+
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
     print("\n" + "=" * 88)

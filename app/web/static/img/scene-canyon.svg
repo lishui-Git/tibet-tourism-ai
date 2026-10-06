@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  原创矢量插画：雅鲁藏布大峡谷（深切峡谷 + 江水 + 南迦巴瓦雪峰）
+  全手写 SVG，无第三方素材；用多层峡谷侧壁的色阶表现"深"的纵深感。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" preserveAspectRatio="xMidYMid slice"
+     role="img" aria-label="雅鲁藏布大峡谷：深切峡谷与雪峰插画">
+  <defs>
+    <linearGradient id="yg-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0c3350"/>
+      <stop offset="50%" stop-color="#2f7d99"/>
+      <stop offset="100%" stop-color="#cfe4e8"/>
+    </linearGradient>
+    <linearGradient id="yg-far" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#cfe0e9"/>
+      <stop offset="100%" stop-color="#7f9db2"/>
+    </linearGradient>
+    <linearGradient id="yg-wall-l" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3f6b82"/>
+      <stop offset="100%" stop-color="#17384d"/>
+    </linearGradient>
+    <linearGradient id="yg-wall-r" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#375f77"/>
+      <stop offset="100%" stop-color="#122e42"/>
+    </linearGradient>
+    <linearGradient id="yg-river" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6fb9c9"/>
+      <stop offset="100%" stop-color="#1c637f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="420" fill="url(#yg-sky)"/>
+
+  <!-- 南迦巴瓦雪峰（远景，画面中心偏上） -->
+  <path d="M196 236 L300 96 L372 190 L428 132 L520 250 L520 420 L196 420 Z" fill="url(#yg-far)"/>
+  <path d="M300 96 L352 168 L322 168 L300 138 L278 166 L250 166 Z" fill="#ffffff"/>
+  <path d="M428 132 L470 194 L446 194 L428 164 L410 192 L386 192 Z" fill="#ffffff" opacity="0.9"/>
+
+  <!-- 左峡谷壁（斜切下去，制造"深切"感） -->
+  <path d="M0 250 L132 268 L214 322 L268 420 L0 420 Z" fill="url(#yg-wall-l)"/>
+  <!-- 右峡谷壁 -->
+  <path d="M640 236 L536 262 L462 316 L404 420 L640 420 Z" fill="url(#yg-wall-r)"/>
+
+  <!-- 谷底江水（一条下行曲线） -->
+  <path d="M262 356 C316 336 372 344 424 372 L452 420 L236 420 Z" fill="url(#yg-river)" opacity="0.95"/>
+  <g fill="#ffffff" opacity="0.38">
+    <rect x="286" y="366" width="66" height="3" rx="1.5"/>
+    <rect x="356" y="380" width="54" height="3" rx="1.5"/>
+  </g>
+
+  <!-- 崖壁纹理（少量刻线，表现岩层） -->
+  <g stroke="#0d2436" stroke-width="1.4" opacity="0.4" fill="none">
+    <path d="M40 274 L120 300"/>
+    <path d="M96 292 L176 336"/>
+    <path d="M566 276 L500 306"/>
+    <path d="M520 300 L470 340"/>
+  </g>
+
+  <!-- 谷口经幡点缀（一处） -->
+  <g transform="translate(500 268)">
+    <path d="M0 0 L0 38" stroke="#e7e0d2" stroke-width="1.8"/>
+    <path d="M0 4 L-64 26" stroke="#e7e0d2" stroke-width="1.3" opacity="0.9"/>
+    <rect x="-56" y="8"  width="12" height="16" fill="#d9a227" opacity="0.94" transform="rotate(-20 -50 16)"/>
+    <rect x="-32" y="16" width="12" height="16" fill="#2f7d4f" opacity="0.94" transform="rotate(-20 -26 24)"/>
+  </g>
+</svg>

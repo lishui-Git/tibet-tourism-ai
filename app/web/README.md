@@ -67,7 +67,15 @@
 | `templates/home.html`、`overview.html`、`spots.html`、`smart.html`、`compare.html`、`admin.html`、`login.html`、`error.html` | 页面模板（`error.html` 为 404/405/500 的中文友好页） |
 | `static/js/common.js` | 公共前端逻辑：`apiGet`、格式化（`fmtInt`/`fmtPct`）、`renderTable`、`caliberNote`、`initChart`、**返回顶部**、**内部文案用户化**（`humanize`/`noticeBox`/`techDetails`） |
 | `static/js/{home,overview,spots,smart,evaluation,qa,compare,tasks,admin,login}.js` | 各页面逻辑；`evaluation.js`+`qa.js` 由 `smart.js` 统一调度（同一整合页的两个子标签） |
-| `static/vendor/{echarts,axios}.min.js` | **本地内置**的 ECharts 5.5.1 与 axios 1.7.7（约 1.06 MB），运行时不依赖外网/CDN |
+| `static/vendor/{echarts,axios}.min.js` | **本地内置**的 ECharts 5.5.1 与 axios 1.7.7（约 1.06 MB），运行时不依赖外网
+| `static/img/*.svg` | **原创矢量插画**（5 个）：`tibet-hero.svg` 首屏雪域天际线（雪山／冰川湖／山脊上的布达拉宫／经幡），`scene-{potala,namtso,canyon,yamdrok}.svg` 景点风景卡。全部手写、合计 < 25 KB，**无第三方图片授权问题** |
+
+> **视觉识别体系（2026-10 视觉改版）**：主题色取"高原天空与冰川湖"的藏蓝／深青
+> （`--c-primary` 系），点缀色取经幡五色中最低调的一支（`--c-accent` 经幡黄）；
+> 视觉签名是一条 3px 的**经幡色带**（导航底部、首屏底部）。
+> 页面用**深色分区 `.band` 与浅色卡片交替**，避免"满屏白卡片、重点不突出"。
+> 插画全部为自绘 SVG——不引入任何下载的照片与视频，因此**无需外部素材授权**，
+> 也不存在"视频加载失败"的风险；同时仍实现了插画失败的降级（见 `common.js` 的 `_initArtFallback`）。/CDN |
 
 > **2026-10 前台改版要点**（面向普通用户的可用性改造，未改动接口契约）：
 > · 一级导航由 7 项收敛为 **6 项**；「智能评价」「智能问答」合并进 **`/smart`**（子标签切换），
@@ -156,7 +164,7 @@
 
 | 页面 | 路径 | 内容 | 依赖接口 |
 |---|---|---|---|
-| 首页 | `/` | 系统能做什么、**真实数据概况**（评论/景点/可评价景点/带图评论）、四个核心功能入口、热门景点（评论量前 8，可直达智能分析）、**结果生成情况**（如实标注未生成项）、技术说明与口径收在折叠区 | `/api/overview/summary`、`/api/spots/ranking` |
+| 首页 | `/` | **首屏 Hero**（自绘雪域插画 + 系统定位 + 四个关键数据 + 进入按钮）、**数据规模**（重点数字块）、**系统能做什么**（深色分区四入口）、**高原上的热门景点**（插画卡 + 真实统计）、**评论量排行**（榜单卡）、结果生成情况（如实标注未生成项）、技术说明与口径收在折叠区 | `/api/overview/summary`、`/api/spots/ranking`、`/api/spots` |
 | 数据总览 | `/overview` | 规模与评分分布（饼图＋范围构成柱图）、时间趋势（年/月切换）、评论量分档、游客来源地区 Top-N、数据来源与局限（折叠） | `/api/overview/*` |
 | 景点分析 | `/spots` | 景点排行（三种排序）、关键字检索+分页、景点详情（资料缺失时整块隐藏而非显示"字段缺失"）、情感分布（两种口径用中性键切换）、年度趋势、关注方面、评论主题、代表评论；具备条件的景点可一键跳转智能分析 | `/api/spots/*` |
 | **智能分析** | `/smart?tab=evaluation\|qa` | **整合页**：`景点评价` 子标签（选景点 → 综合评价／优势／问题／关注点 + 数据依据；未生成时如实说明并给出基础统计入口）与 `智能问答` 子标签（提问 → 系统回答，或"为什么没生成 + 检索到的数据依据"）；支持 `?spot=<id>` 直达某景点评价 | `/api/spots/{id}/report`、`/api/qa/ask`、`/api/spots/ranking` |
