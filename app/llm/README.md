@@ -368,10 +368,16 @@ mysql -e "SELECT ref_key, message FROM task_log WHERE level='ERROR' AND stage='s
 >
 > **数据来源与局限（如实说明）**：
 > · 32 次实测中，**最后 8 次**的 token 用量已随结果写入 `sentiment.raw_json.usage`，可仅凭数据库复核；
->   更早的 24 次当时尚未落库 usage，只能引用进程统计（preflight 会把这 24 条作为**提示项**列出，不阻断）。
+>   更早的 23 次当时尚未落库 usage，只能引用进程统计（preflight 会把这 23 条作为**提示项**列出，不阻断）。
 > · 样本取 `comment_id` 最小的 32 条（`--limit` 的确定性口径），短评比例与全库不同，
 >   全量费用应以实际运行后的统计为准；本表用于判断"是否可负担"，不作为结题定稿数字。
 > · 真实费用最终以 DeepSeek 账单为准；单价可用 `.env` 的 `APP_DEEPSEEK_PRICE_INPUT/OUTPUT` 覆盖。
+>
+> **口径订正（2026-10-06）**：上面"更早的 23 次"原写作 24（并在本句重复为"这 24 条"）。
+> 32 次是**历史调用次数**，而 `comment_id=73603914` 已在开发期事故中删除（见 §6 待补跑 1 条），
+> 其 usage 状态无从复原；因此**当前库内实测为 23 条**
+> （`raw_json.source='deepseek'` 共 31 条 = 8 条有 usage + 23 条无），
+> 与 `--stage preflight` 的 `usage_missing` 输出逐位一致。**调用次数 32 与现存行数 31、缺 usage 行数 23 并不矛盾。**
 
 成本统计由客户端 `CallStats` 给出：请求数、实际请求次数（含重试）、输入/输出 token、
 平均 token、耗时、失败分类；`estimate_cost()` 用配置单价换算金额。
