@@ -67,21 +67,10 @@ MEASURED_TOKENS_PER_CALL_MAX = 600
 INPUT_SHARE = 0.6955
 OUTPUT_SHARE = 0.3045
 
-def _bucket_of_chars(body_chars: int) -> str:
-    """与 `LENGTH_BUCKET_SQL` **完全同口径**的分桶标签（用于按桶名精确统计）。"""
-    n = int(body_chars or 0)
-    for upper, label in ((20, "01: <=20"), (40, "02: 21-40"), (60, "03: 41-60"),
-                         (80, "04: 61-80"), (100, "05: 81-100"), (150, "06: 101-150"),
-                         (200, "07: 151-200"), (300, "08: 201-300"), (500, "09: 301-500"),
-                         (1000, "10: 501-1000")):
-        if n <= upper:
-            return label
-    return "11: >1000"
-
-
 # 保守上界推导所锚定的"样本最长正文"长度：库内 8 条 usage 样本里最长的那条正文为 126 字
 # （token 600，即当前已观察到的最大值）。超过这个长度的评论，样本**完全没有覆盖**，
-# 因此按桶名精确统计它们的条数，用来提醒"样本之外的量有多大"。
+# 因此单独用一条 SQL 精确统计它们的条数，用来提醒"样本之外的量有多大"。
+# （为什么要单独查：126 落在长度分桶的"101–150"桶内部，用桶平均值判断会把该桶整桶算错。）
 SAMPLE_MAX_BODY_CHARS = 126
 
 # ---------------------------------------------------------------------------
@@ -250,6 +239,38 @@ SQL = {
                         "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
     "usage_sum_tokens": "SELECT COALESCE(SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
                         "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+    # 待处理调用层里，正文长度**超出样本覆盖范围**（>126 字，即库内 usage 样本的最长正文）的条数。
+    # 为什么单独用一条 SQL 而不是从长度分桶里估：126 落在"101–150"桶内部，
+    # 用桶平均值判断会把该桶整桶算错（实测差 1,534 条）。这里与"调用层待处理"完全同口径。
+    "pending_longer_than_sample": """
+        SELECT COUNT(*) FROM review r
+         WHERE r.is_low_info = 0
+           AND (r.is_dup_content = 0 OR r.comment_id IN (
+                 SELECT g.comment_id FROM (
+                     SELECT comment_id, dup_group_id,
+                            ROW_NUMBER() OVER (PARTITION BY dup_group_id
+                                ORDER BY is_low_info ASC, content_length DESC, comment_id ASC) AS rn
+                       FROM review WHERE is_dup_content = 1 AND dup_group_id IS NOT NULL) g
+                  WHERE g.rn = 1))
+           AND r.content IS NOT NULL AND TRIM(r.content) <> ''
+           AND CHAR_LENGTH(TRIM(r.content)) > 126
+           AND NOT EXISTS (SELECT 1 FROM sentiment se
+                            WHERE se.comment_id = r.comment_id AND se.method = 'deepseek')
+    """,
+    "pending_max_body_chars": """
+        SELECT COALESCE(MAX(CHAR_LENGTH(TRIM(r.content))), 0) FROM review r
+         WHERE r.is_low_info = 0
+           AND (r.is_dup_content = 0 OR r.comment_id IN (
+                 SELECT g.comment_id FROM (
+                     SELECT comment_id, dup_group_id,
+                            ROW_NUMBER() OVER (PARTITION BY dup_group_id
+                                ORDER BY is_low_info ASC, content_length DESC, comment_id ASC) AS rn
+                       FROM review WHERE is_dup_content = 1 AND dup_group_id IS NOT NULL) g
+                  WHERE g.rn = 1))
+           AND r.content IS NOT NULL AND TRIM(r.content) <> ''
+           AND NOT EXISTS (SELECT 1 FROM sentiment se
+                            WHERE se.comment_id = r.comment_id AND se.method = 'deepseek')
+    """,
 }
 
 # 待处理"调用层"评论的正文长度分桶（只读）。
@@ -480,8 +501,8 @@ def collect() -> Preflight:
         for row in result.length_buckets
     ]
     weighted_conservative = conservative_tokens_per_call_weighted(buckets)
-    # 绝对上界：分桶里最长的正文长度（用于给出"最长那一条"的单价上限）
-    max_body_chars = int(max((row.get("avg_chars") or 0) for row in result.length_buckets)) if result.length_buckets else 0
+    # 绝对上界：待处理里最长的那条正文（用于给出"最长一条"的单条 token 上界）
+    max_body_chars = result.counts.get("pending_max_body_chars", 0)
 
     report_cost = estimate_report_cost(report_pending)
     result.workload = {
@@ -521,13 +542,9 @@ def collect() -> Preflight:
                  "avg_chars": float(row.get("avg_chars") or 0)}
                 for row in result.length_buckets
             ],
-            "longer_than_sample_max_chars": sum(
-                int(row.get("n") or 0)
-                for row in result.length_buckets
-                # 按桶名精确判断，而不是用桶平均值——"101-150" 这个跨 126 边界的桶必须落在"未覆盖"一侧
-                if _bucket_of_chars(SAMPLE_MAX_BODY_CHARS) < str(row.get("bucket") or "")
-            ),
+            "longer_than_sample_max_chars": result.counts.get("pending_longer_than_sample", 0),
             "sample_max_body_chars": SAMPLE_MAX_BODY_CHARS,
+            "max_body_chars": max_body_chars,
             "conservative_tokens_per_call_weighted": round(weighted_conservative, 1),
             "conservative_tokens_per_call_max_body": conservative_tokens_per_call(max_body_chars),
             "basis": (

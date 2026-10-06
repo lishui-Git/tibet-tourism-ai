@@ -389,6 +389,11 @@ def _build_api_record(
 def analyze_one(client: ChatClient, row: dict) -> SemanticResult:
     """一条评论的"调用 → 解析 → 校验"，必要时做一次修复轮（§15.A.4/A.5）。
 
+    ⚠️ **本函数不是生产路径**：`run_semantic_analysis` 走的是 `call_batch()`（并发批处理）。
+    因为并发版必须把修复轮的 usage 合并上报（见 `merge_call_results`），而本函数直接返回
+    `SemanticResult`、拿不到第二次调用的 usage，所以**未**做同样处理。
+    保留它是为了小样本单条调试；若要用于生产，必须先解决修复轮 usage 丢失的问题。
+
     :raises LlmError: 调用失败（已重试到上限）
     :raises ValidationError: 返回结构不可用（修复轮后仍失败）
     """
