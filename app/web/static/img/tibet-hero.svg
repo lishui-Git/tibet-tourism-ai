@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  西藏旅游景点智能评价与分析系统 · 原创矢量插画（雪域天际线）
+  ===========================================================================
+  为什么用**自绘 SVG**而不是下载照片：
+    · 版权干净：完全原创，不受第三方图库授权约束，可安全提交进仓库；
+    · 体积极小（几 KB），秒开、不拖慢答辩演示，也不需要外网；
+    · 矢量放大不糊，宽屏 4K 与手机都清晰；
+    · 可按主题色调整，与全站配色天然一致。
+  构图（从左到右、由近及远共四层，制造纵深）：
+    ① 高原天空 + 日光晕  ② 远景雪山  ③ 中景主峰群与雪线
+    ④ 前景山脊：**布达拉宫坐落在右侧山脊上**（不是悬空的建筑图标），谷底有江。
+  经幡只作**一处**点缀。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 620" preserveAspectRatio="xMidYMid slice"
+     role="img" aria-label="西藏高原天际线插画：雪山、峡谷与山脊上的布达拉宫">
+  <defs>
+    <linearGradient id="tb-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#062338"/>
+      <stop offset="34%"  stop-color="#0d3f5e"/>
+      <stop offset="66%"  stop-color="#1d6a8c"/>
+      <stop offset="100%" stop-color="#7fb6c6"/>
+    </linearGradient>
+    <linearGradient id="tb-far" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#dcebf2"/>
+      <stop offset="60%"  stop-color="#9dbdd0"/>
+      <stop offset="100%" stop-color="#6d93aa"/>
+    </linearGradient>
+    <linearGradient id="tb-mid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#5b8ba6"/>
+      <stop offset="100%" stop-color="#2a5570"/>
+    </linearGradient>
+    <linearGradient id="tb-near" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#2c556e"/>
+      <stop offset="100%" stop-color="#122f42"/>
+    </linearGradient>
+    <linearGradient id="tb-snow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="62%"  stop-color="#e6f0f5"/>
+      <stop offset="100%" stop-color="#a8c2d2"/>
+    </linearGradient>
+    <linearGradient id="tb-palace-white" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="62%"  stop-color="#ece2d2"/>
+      <stop offset="100%" stop-color="#c3b39a"/>
+    </linearGradient>
+    <linearGradient id="tb-palace-red" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#b8483c"/>
+      <stop offset="100%" stop-color="#7a2a23"/>
+    </linearGradient>
+    <linearGradient id="tb-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#f7dc85"/>
+      <stop offset="100%" stop-color="#c9992c"/>
+    </linearGradient>
+    <radialGradient id="tb-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%"   stop-color="#ffeec2" stop-opacity="0.95"/>
+      <stop offset="45%"  stop-color="#ffd98a" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ① 天空与日光晕（光源在右上，与布达拉宫同侧，说明"为什么宫殿是亮的"） -->
+  <rect width="1440" height="620" fill="url(#tb-sky)"/>
+  <circle cx="1090" cy="150" r="260" fill="url(#tb-sun)"/>
+
+  <!-- 云带：极简横条 -->
+  <g fill="#ffffff" opacity="0.14">
+    <rect x="120"  y="128" width="320" height="7" rx="3.5"/>
+    <rect x="210"  y="150" width="190" height="6" rx="3"/>
+    <rect x="900"  y="96"  width="280" height="7" rx="3.5"/>
+    <rect x="1010" y="118" width="170" height="6" rx="3"/>
+    <rect x="560"  y="196" width="230" height="6" rx="3"/>
+  </g>
+
+  <!-- ② 远景雪山（第二层）：带雪顶，用来把主峰群"推"到前面 -->
+  <path d="M0 372 L104 268 L172 322 L286 236 L374 310 L452 266 L540 342 L624 286 L712 362 L806 280 L884 336 L968 292 L1058 366 L1148 306 L1236 368 L1330 318 L1440 374 L1440 620 L0 620 Z"
+        fill="url(#tb-far)" opacity="0.78"/>
+  <g fill="#ffffff" opacity="0.86">
+    <path d="M286 236 L330 288 L242 288 Z"/>
+    <path d="M806 280 L848 328 L764 328 Z"/>
+    <path d="M1148 306 L1186 352 L1110 352 Z"/>
+    <path d="M624 286 L662 330 L586 330 Z"/>
+  </g>
+
+  <!-- ③ 中景主峰群（第三层）：加厚、加大雪线，形成画面骨架 -->
+  <path d="M0 452 L132 318 L226 402 L366 232 L470 356 L566 284 L694 440 L796 330 L906 428 L1016 348 L1126 456 L1236 374 L1344 458 L1440 408 L1440 620 L0 620 Z"
+        fill="url(#tb-mid)"/>
+  <path d="M366 232 L470 356 L436 356 L400 314 L372 352 L334 352 Z" fill="url(#tb-snow)"/>
+  <path d="M132 318 L226 402 L200 402 L172 366 L146 398 L114 398 Z" fill="url(#tb-snow)"/>
+  <path d="M796 330 L906 428 L878 428 L846 390 L818 424 L774 424 Z" fill="url(#tb-snow)"/>
+  <path d="M566 284 L694 440 L658 440 L620 388 L584 436 L540 436 Z" fill="#ffffff" opacity="0.82"/>
+  <path d="M1236 374 L1344 458 L1318 458 L1286 420 L1258 454 L1210 454 Z" fill="#ffffff" opacity="0.76"/>
+  <!-- 山体受光/背光分割线：让"山"而不是"三角色块" -->
+  <g fill="#0d2b3d" opacity="0.28">
+    <path d="M366 232 L400 314 L372 352 L334 352 Z"/>
+    <path d="M796 330 L846 390 L818 424 L774 424 Z"/>
+    <path d="M132 318 L172 366 L146 398 L114 398 Z"/>
+  </g>
+
+  <!-- ④ 前景山脊（最暗一层）+ 右侧台地：布达拉宫坐落的"红山" -->
+  <path d="M0 520 L180 486 L360 512 L560 470 L760 500 L960 452 L1140 430 L1300 414 L1440 424 L1440 620 L0 620 Z"
+        fill="url(#tb-near)"/>
+  <!-- 布达拉宫所在的平坦台地（明确画出，避免"悬空"观感）：
+       台地顶面略高于山脊，边缘有岩壁厚度 -->
+  <path d="M952 466 L1360 436 L1360 452 L952 482 Z" fill="#35617a" opacity="0.85"/>
+  <path d="M952 482 L1360 452 L1360 620 L952 620 Z" fill="#183a4f"/>
+  <!-- 谷底江流 -->
+  <path d="M0 556 C220 536 420 562 640 544 C860 526 1040 552 1240 536 C1330 530 1400 536 1440 532
+           L1440 562 C1400 566 1330 560 1240 566 C1040 582 860 556 640 574 C420 592 220 566 0 586 Z"
+        fill="#5aa8bf" opacity="0.40"/>
+
+  <!-- ⑤ 布达拉宫：坐落在右侧台地上（基座与台地顶面 y≈362 对齐，不留悬空缝隙）
+       组内坐标：台基底边 y=122 ⇒ 122 + 300 = 422，落在台地顶面范围内 -->
+  <g transform="translate(1030 240)">
+    <!-- 红山台基：上窄下宽，与山脊融合 -->
+    <path d="M-26 122 L236 122 L214 96 L-6 96 Z" fill="#1b3d52"/>
+    <path d="M-6 96 L214 96 L206 82 L4 82 Z" fill="#2a5468"/>
+    <!-- 白宫两翼 -->
+    <rect x="4"   y="42" width="56" height="42" fill="url(#tb-palace-white)"/>
+    <rect x="198" y="42" width="56" height="42" fill="url(#tb-palace-white)"/>
+    <rect x="4"   y="34" width="56" height="8"  fill="#9d8b71"/>
+    <rect x="198" y="34" width="56" height="8"  fill="#9d8b71"/>
+    <!-- 红宫（居中最高） -->
+    <rect x="64"  y="14" width="130" height="70" fill="url(#tb-palace-red)"/>
+    <rect x="64"  y="6"  width="130" height="9"  fill="url(#tb-gold)"/>
+    <!-- 金顶与宝瓶 -->
+    <path d="M84 6 L129 -16 L174 6 Z" fill="url(#tb-gold)"/>
+    <rect x="122" y="-30" width="14" height="16" fill="url(#tb-gold)"/>
+    <circle cx="129" cy="-35" r="6" fill="#fff0bd"/>
+    <!-- 檐口阴影线（增加立体感） -->
+    <rect x="64" y="56" width="130" height="4" fill="#5c1c17" opacity="0.5"/>
+    <!-- 窗洞：规律排布，体现"宫"的结构 -->
+    <g fill="#241c15" opacity="0.82">
+      <rect x="76"  y="22" width="11" height="14"/><rect x="98"  y="22" width="11" height="14"/>
+      <rect x="120" y="22" width="11" height="14"/><rect x="142" y="22" width="11" height="14"/>
+      <rect x="164" y="22" width="11" height="14"/>
+      <rect x="76"  y="66" width="11" height="14"/><rect x="98"  y="66" width="11" height="14"/>
+      <rect x="120" y="66" width="11" height="14"/><rect x="142" y="66" width="11" height="14"/>
+      <rect x="164" y="66" width="11" height="14"/>
+      <rect x="16"  y="54" width="10" height="13"/><rect x="36"  y="54" width="10" height="13"/>
+      <rect x="210" y="54" width="10" height="13"/><rect x="230" y="54" width="10" height="13"/>
+    </g>
+    <!-- 之字形登宫盘道 -->
+    <path d="M118 84 L108 104 L156 112 L146 128" stroke="#d9cdb8" stroke-width="2.4"
+          opacity="0.7" fill="none"/>
+  </g>
+
+  <!-- ⑥ 经幡（唯一的宗教色彩元素，收敛为一处） -->
+  <g transform="translate(120 250)">
+    <path d="M0 0 L0 74" stroke="#e9e2d4" stroke-width="2" opacity="0.9"/>
+    <path d="M0 6 L288 80" stroke="#e9e2d4" stroke-width="1.6" opacity="0.85"/>
+    <rect x="18"  y="8"   width="18" height="25" fill="#2f6fa5" opacity="0.93" transform="rotate(14 27 20)"/>
+    <rect x="70"  y="22"  width="18" height="25" fill="#f2f6f8" opacity="0.93" transform="rotate(14 79 34)"/>
+    <rect x="122" y="36"  width="18" height="25" fill="#b3352f" opacity="0.93" transform="rotate(14 131 48)"/>
+    <rect x="174" y="50"  width="18" height="25" fill="#2f7d4f" opacity="0.93" transform="rotate(14 183 62)"/>
+    <rect x="226" y="64"  width="18" height="25" fill="#d9a227" opacity="0.93" transform="rotate(14 235 76)"/>
+  </g>
+
+  <!-- ⑦ 统一压暗：让上方文字与按钮的对比度稳定达标 -->
+  <rect width="1440" height="620" fill="#04202f" opacity="0.12"/>
+</svg>

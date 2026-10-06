@@ -1,18 +1,18 @@
 {% extends "base.html" %}
 {% block title %}景点对比 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}M4 景点对比：指标差异由系统计算，解读为可选的在线生成{% endblock %}
+{% block subtitle %}逐项对照两个景点的游客评价{% endblock %}
 
 {% block content %}
 <section class="card">
   <h2>选择两个景点进行对比</h2>
   <p class="hint">
-    对比的<strong>指标差异、比率、样本量比全部由后端计算</strong>；"解读"需要在线模型，
-    当前默认关闭（不产生任何模型费用）。数据部分不受影响，始终可用。
+    系统会逐项对照两个景点的评论量、平均评分、好评率、差评率、情感分布与游客关注的方面，
+    并标出差距。请选择两个<strong>不同</strong>的景点。
   </p>
-  <p class="hint">
-    <select id="cmp-a"><option value="">— 景点 A —</option></select>
+  <p class="hint cmp-picker">
+    <select id="cmp-a" aria-label="景点 A"><option value="">— 景点 A —</option></select>
     <span class="vs">对比</span>
-    <select id="cmp-b"><option value="">— 景点 B —</option></select>
+    <select id="cmp-b" aria-label="景点 B"><option value="">— 景点 B —</option></select>
     <button id="btn-compare" type="button">开始对比</button>
     <button id="btn-cmp-reset" type="button" class="ghost">清空</button>
   </p>

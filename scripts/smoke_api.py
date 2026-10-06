@@ -18,14 +18,20 @@ client = app.test_client()
 
 CASES = [
     # --- 页面（展示层，只渲染模板；数据由页面内 JS 调 /api/* 获取） ---
+    # 【2026-10 前台改版】一级导航收敛：新增 /smart（智能分析，整合原评价+问答）与 /admin；
+    # 旧地址 /evaluation、/qa、/tasks 保留为**重定向**，因此这里断言 301/302 而不是 200
+    # ——这不是"接口坏了"，而是"旧链接不失效"，属预期行为。
     ("/", 200, None),
     ("/overview", 200, None),
     ("/spots", 200, None),
-    ("/evaluation", 200, None),
+    ("/smart", 200, None),
+    ("/smart?tab=qa", 200, None),
     ("/compare", 200, None),
     ("/login", 200, None),
-    ("/qa", 200, None),
-    ("/tasks", 302, None),   # 未登录 → 重定向到 /login（服务端会话检查）
+    ("/evaluation", 301, None),   # 旧地址 → /smart?tab=evaluation
+    ("/qa", 301, None),           # 旧地址 → /smart?tab=qa
+    ("/admin", 302, None),        # 未登录 → 重定向到 /login（服务端会话检查）
+    ("/tasks", 302, None),        # 旧地址；未登录同样先跳登录
     # --- 静态资源（本地 vendored，运行时不依赖外网/CDN） ---
     ("/static/vendor/echarts.min.js", 200, None),
     ("/static/vendor/axios.min.js", 200, None),
@@ -33,10 +39,13 @@ CASES = [
     ("/static/js/home.js", 200, None),
     ("/static/js/overview.js", 200, None),
     ("/static/js/spots.js", 200, None),
+    ("/static/js/smart.js", 200, None),
     ("/static/js/evaluation.js", 200, None),
+    ("/static/js/qa.js", 200, None),
     ("/static/js/compare.js", 200, None),
     ("/static/js/login.js", 200, None),
     ("/static/js/tasks.js", 200, None),
+    ("/static/js/admin.js", 200, None),
     ("/static/css/app.css", 200, None),
     # --- 自检接口 ---
     ("/healthz", 200, 0),

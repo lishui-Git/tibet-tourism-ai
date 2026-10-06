@@ -35,15 +35,22 @@ TEMPLATES = ROOT / "app" / "web" / "templates"
 STATIC_JS = ROOT / "app" / "web" / "static" / "js"
 
 # 页面 → (模板, 该页的脚本)
-PAGES: tuple[tuple[str, str, str], ...] = (
-    ("首页", "home.html", "home.js"),
-    ("M1 数据总览", "overview.html", "overview.js"),
-    ("M2 景点分析", "spots.html", "spots.js"),
-    ("M3 智能评价", "evaluation.html", "evaluation.js"),
-    ("M4 景点对比", "compare.html", "compare.js"),
-    ("M5 智能问答", "qa.html", "qa.js"),
-    ("M6 任务与口径", "tasks.html", "tasks.js"),
-    ("登录", "login.html", "login.js"),
+#
+# 【2026-10 前台改版】一级导航收敛为「首页｜数据总览｜景点分析｜智能分析｜景点对比｜管理员」，
+# 原先独立的「智能评价」「智能问答」「任务与口径」三个页面合并为：
+#   · evaluation.js + qa.js  → 共用 `smart.html`（子标签切换）
+#   · tasks.js + admin.js    → 共用 `admin.html`
+# 因此这里按**合并后的真实结构**声明；若仍按旧结构检查，会因为"模板缺失"而误报。
+PAGES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("首页", "home.html", ("home.js",)),
+    ("数据总览", "overview.html", ("overview.js",)),
+    ("景点分析", "spots.html", ("spots.js",)),
+    # 整合页：一个模板承载两个子功能的脚本，因此都要检查
+    ("智能分析（景点评价 + 智能问答）", "smart.html", ("smart.js", "evaluation.js", "qa.js")),
+    ("景点对比", "compare.html", ("compare.js",)),
+    # 管理后台：任务与口径 + 登录信息 + 自检
+    ("管理后台", "admin.html", ("tasks.js", "admin.js")),
+    ("管理员登录", "login.html", ("login.js",)),
 )
 
 # 公共脚本（被各页共用），其引用的 id 可能来自 base.html 或各页模板
@@ -99,36 +106,39 @@ def main() -> int:
     common_ids = ids_in_js(STATIC_JS / COMMON_JS)
     print(f"\n公共骨架 base.html 提供 {len(base_ids)} 个 id；{COMMON_JS} 引用 {len(common_ids)} 个 id")
 
-    for label, template_name, js_name in PAGES:
+    # 整合页会有多个脚本共用一个模板：逐个脚本检查其引用的 id 是否都能在该模板/公共骨架里找到
+    for label, template_name, js_names in PAGES:
         template_path = TEMPLATES / template_name
-        js_path = STATIC_JS / js_name
-        print(f"\n[{label}] {template_name} ↔ {js_name}")
+        print(f"\n[{label}] {template_name} ↔ {' + '.join(js_names)}")
         if not template_path.exists():
             check(f"{template_name} 存在", False, "模板缺失")
             continue
-        if not js_path.exists():
-            check(f"{js_name} 存在", False, "脚本缺失")
-            continue
 
         page_ids = ids_in_html(template_path)
-        js_generated = ids_defined_in_js(js_path)
-        referenced = ids_in_js(js_path)
-        missing = sorted(
-            rid for rid in referenced
-            if rid not in page_ids and rid not in base_ids and rid not in common_ids
-            and rid not in js_generated
-        )
-        detail = f"模板 {len(page_ids)} 个 + 脚本动态生成 {len(js_generated)} 个"
-        check(f"JS 引用的 {len(referenced)} 个 id 都能找到", not missing,
-              ("缺失：" + ", ".join(missing)) if missing else detail)
+        for js_name in js_names:
+            js_path = STATIC_JS / js_name
+            if not js_path.exists():
+                check(f"{js_name} 存在", False, "脚本缺失")
+                continue
+            js_generated = ids_defined_in_js(js_path)
+            referenced = ids_in_js(js_path)
+            missing = sorted(
+                rid for rid in referenced
+                if rid not in page_ids and rid not in base_ids and rid not in common_ids
+                and rid not in js_generated
+            )
+            detail = f"模板 {len(page_ids)} 个 + 脚本动态生成 {len(js_generated)} 个"
+            check(f"{js_name} 引用的 {len(referenced)} 个 id 都能找到", not missing,
+                  ("缺失：" + ", ".join(missing)) if missing else detail)
 
     # 反向检查：模板里声明了 id，但没有任何脚本引用它——可能是废弃控件（提示级，不算失败）
     print("\n[提示] 模板中声明但脚本未引用的 id（可能是废弃控件，供人工确认）")
     all_js_ids: set[str] = set(common_ids)
-    for _, _, js_name in PAGES:
-        p = STATIC_JS / js_name
-        if p.exists():
-            all_js_ids |= ids_in_js(p)
+    for _, _, js_names in PAGES:
+        for js_name in js_names:
+            p = STATIC_JS / js_name
+            if p.exists():
+                all_js_ids |= ids_in_js(p)
     for _, template_name, _ in PAGES:
         p = TEMPLATES / template_name
         if not p.exists():

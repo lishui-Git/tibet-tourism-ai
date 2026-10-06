@@ -1,32 +1,57 @@
-/* M5 智能问答页：提问 → 展示系统回答或"不可用原因 + 数据依据"。
-   本页只调用 /api/qa/ask —— 该接口默认不会调用模型（APP_QA_LIVE=0）。 */
+/* 「智能分析 → 智能问答」子功能：提问 → 展示回答或"为什么没生成回答 + 数据依据"。
+   只调用 /api/qa/ask（只读数据库检索 + 可选模型组织语言）。
 
+   【文案纪律】面向普通用户：
+     · 不显示 APP_QA_LIVE / reached_model / token / prompt 版本 / 内部 reason 码；
+     · "暂未生成自然语言回答"要讲成用户能理解的话，并说明**数据依据仍然可用**；
+     · 技术细节收进折叠区。 */
+
+/** 问题类型 → 用户可读的说法。 */
 const TYPE_LABELS = {
   SPOT_EVALUATION: '景点评价咨询',
   SPOT_COMPARISON: '景点差异对比',
   VISITOR_FOCUS: '游客关注点',
-  SENTIMENT_EXPLAIN: '情感／方面解释',
+  SENTIMENT_EXPLAIN: '情感与方面解释',
   DATA_METRIC: '数据指标查询',
   RANKING: '排行相关',
-  OUT_OF_SCOPE: '超范围（拒答）',
+  OUT_OF_SCOPE: '超出可回答范围',
 };
 
-const REASON_LABELS = {
-  LIVE_DISABLED: '问答生成为在线能力，当前已关闭',
-  API_KEY_MISSING: '未配置 API Key',
-  SPOT_NOT_RECOGNIZED: '未能识别景点名称',
-  NEED_TWO_SPOTS: '对比需要两个景点',
-  NO_DATA: '数据库中没有相关信息',
-  EMPTY_QUESTION: '问题为空',
-  LLM_FAILED: '模型调用失败',
+/** 未生成回答的原因 → 用户可读的说法 + 建议。 */
+const REASON_TEXT = {
+  LIVE_DISABLED: {
+    text: '自然语言回答功能当前未开启。',
+    advice: '系统的检索与分析结果仍然可用——下面就是根据你的问题检索到的数据依据。',
+  },
+  API_KEY_MISSING: {
+    text: '自然语言回答功能当前未配置，暂时无法生成成段回答。',
+    advice: '检索到的数据依据同样可以回答你的问题，见下方表格。',
+  },
+  SPOT_NOT_RECOGNIZED: {
+    text: '没有识别出你问的是哪个景点。',
+    advice: '请把景点名称写得更完整一些，例如「布达拉宫」「纳木措景区」。',
+  },
+  NEED_TWO_SPOTS: {
+    text: '对比类问题需要同时提到两个景点。',
+    advice: '例如可以问「布达拉宫和纳木措景区哪个好」。',
+  },
+  NO_DATA: {
+    text: '数据库里没有与这个问题相关的信息。',
+    advice: '系统只依据已采集的评论数据作答，没有相关数据时不会编造内容。',
+  },
+  EMPTY_QUESTION: { text: '问题内容为空。', advice: '请输入你想了解的问题。' },
+  LLM_FAILED: {
+    text: '生成回答时出现异常，本次没能给出成段回答。',
+    advice: '检索到的数据依据不受影响，见下方表格；稍后可以再试一次。',
+  },
 };
 
-/** 渲染"检索到的结构化事实"（CC-3：只展示结构化事实，不含原始评论全集）。 */
+/** 渲染"检索到的结构化事实"（只展示结构化事实，不含原始评论全集）。 */
 function renderFacts(blocks) {
   if (!blocks || !blocks.length) return '';
   const sections = blocks.map(block => {
     if (block.source === 'caliber') {
-      return `<div class="caliber">口径说明：${escapeHtml((block.items[0] || {}).口径 || '')}</div>`;
+      return `<div class="caliber">数据口径：${escapeHtml((block.items[0] || {}).口径 || '')}</div>`;
     }
     const items = block.items || [];
     if (!items.length) return '';
@@ -40,83 +65,94 @@ function renderFacts(blocks) {
       return escapeHtml(v);
     }));
     return `
-      <h4>${escapeHtml(block.title || '')}
-        <span class="muted">（来源：${escapeHtml(block.source || '')}）</span></h4>
+      <h4>${escapeHtml(block.title || '')}</h4>
       ${renderTable(keys, rows)}`;
   }).join('');
-  return `<h3>数据依据（回答只能引用这些事实）</h3>${sections}`;
+  return `<h3>数据依据</h3>
+    <p class="hint">回答只依据以下来自评论数据的事实，不引入外部信息。</p>${sections}`;
 }
 
 function renderQa(d) {
-  const typeLabel = TYPE_LABELS[d.question_type] || d.question_type;
-  const spotTags = (d.spots || []).map(s => `<span class="kw">${escapeHtml(s.spot_name)}</span>`).join('');
-  const head = `
-    ${window.UI.statCards([
-      { label: '问题类型', value: escapeHtml(typeLabel) },
-      { label: '识别到的景点', value: (d.spots || []).length ? (d.spots || []).length + ' 个' : '—', sub: (d.spots || []).map(s => s.spot_name).join('、') },
-      { label: '本次是否调用模型', value: d.reached_model ? '<span class="tag warn">是</span>' : '<span class="tag ok">否（零成本）</span>' },
-      { label: '事实样本量', value: fmtInt(d.sample_size) },
-    ])}`;
+  const typeLabel = TYPE_LABELS[d.question_type] || '问题';
+  const spotNames = (d.spots || []).map(s => s.spot_name).join('、');
+
+  // 完整返回体留控制台：内部字段（model / prompt_version / token / reason）不进页面正文，
+  // 但排查与答辩时打开控制台即可看到全部口径。
+  try { console.info('[智能问答] 接口返回', d); window.__lastQa = d; } catch (e) { /* 忽略 */ }
+
+  const head = window.UI.statCards([
+    { label: '问题类型', value: escapeHtml(typeLabel) },
+    { label: '识别到的景点', value: (d.spots || []).length ? `${(d.spots || []).length} 个` : '—',
+      sub: spotNames || '未涉及具体景点' },
+    { label: '数据依据条数', value: fmtInt(d.sample_size), sub: '来自评论分析结果' },
+  ]);
 
   if (d.available && d.answer) {
-    const modelLine = d.reached_model
-      ? `<p class="hint">模型：${escapeHtml(d.model || '')}　Prompt 版本：${escapeHtml(d.prompt_version || '')}
-         　token：${fmtInt(d.token_usage)}　生成时间：${escapeHtml(d.generated_at || '')}</p>`
-      : '';
+    const outOfScope = d.question_type === 'OUT_OF_SCOPE';
     return `
       ${head}
-      ${d.question_type === 'OUT_OF_SCOPE' ? '<div class="alert warn">该问题超出系统可回答范围（已直接拒答，未调用模型）。</div>' : ''}
+      ${outOfScope
+        ? window.UI.notice('这个问题超出了系统的可回答范围，系统已直接说明、未作任何推测。', 'warn')
+        : ''}
       <div class="qa-answer">
         <h4>回答</h4>
         <p>${escapeHtml(d.answer)}</p>
-        ${d.need_review ? '<div class="alert warn">回答中的数字与提供的事实不完全一致，已标记待人工复核。</div>' : ''}
+        ${d.need_review
+          ? window.UI.notice('回答中的部分数字与提供的数据依据不完全一致，已标记待人工复核。', 'warn')
+          : ''}
       </div>
-      ${modelLine}
       ${renderFacts(d.facts)}
       ${caliberNote(d.caliber_note, d.sample_size)}`;
   }
 
-  // 未生成回答：如实说明原因 + 展示已检索到的依据
-  const reasonLabel = REASON_LABELS[d.reason] || d.reason || '';
+  // 未生成回答：如实说明原因 + 展示已检索到的依据（依据本身就有价值）
+  const known = REASON_TEXT[d.reason] || {};
+  const text = known.text || '本次没有生成成段回答。';
+  const advice = known.advice || '';
   return `
     ${head}
-    <div class="alert warn">
-      <strong>未生成自然语言回答</strong>（原因：${escapeHtml(reasonLabel)}）<br/>
-      ${escapeHtml(d.message_text || '')}
-    </div>
+    ${window.UI.notice(text, 'warn')}
+    ${advice ? `<p class="hint">${escapeHtml(advice)}</p>` : ''}
     ${renderFacts(d.facts)}
     ${caliberNote(d.caliber_note, d.sample_size)}`;
 }
 
 async function doAsk(question) {
-  const q = question !== undefined ? question : document.getElementById('qa-question').value.trim();
+  const input = document.getElementById('qa-question');
   const box = document.getElementById('qa-body');
+  if (!box) return;
+  const q = question !== undefined ? question : (input ? input.value.trim() : '');
   if (!q) {
-    box.innerHTML = window.UI.empty('请输入问题。', 'warn');
+    box.innerHTML = window.UI.empty('请先输入你的问题。', 'warn');
     return;
   }
-  if (question !== undefined) document.getElementById('qa-question').value = q;
-  box.innerHTML = '<p class="hint">处理中（分类 → 识别景点 → 检索事实）…</p>';
+  if (input) input.value = q;
+  box.innerHTML = '<p class="hint">正在检索相关数据…</p>';
   try {
     const resp = await axios.post('/api/qa/ask', { question: q });
     const body = resp.data || {};
     if (body.code !== 0) {
-      box.innerHTML = `<div class="alert bad">提问失败：${escapeHtml(body.message || '')}（code=${body.code}）</div>`;
+      box.innerHTML = window.UI.notice(
+        `提问失败：${window.UI.userMessage({ code: body.code, message: body.message })}`,
+        'bad', `业务码 ${body.code}：${body.message}`);
       return;
     }
-    box.innerHTML = renderQa(body.data);
+    box.innerHTML = renderQa(body.data || {});
   } catch (e) {
     const data = e.response && e.response.data;
-    box.innerHTML = `<div class="alert bad">提问失败：${escapeHtml((data && data.message) || e.message)}
-      ${data ? `（code=${data.code}）` : ''}</div>`;
+    box.innerHTML = window.UI.notice(
+      `提问失败：${window.UI.userMessage(data ? { code: data.code, message: data.message } : e)}`,
+      'bad', data ? `业务码 ${data.code}：${data.message}` : String(e));
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('btn-ask').addEventListener('click', () => doAsk());
-  document.getElementById('qa-question').addEventListener('keydown', ev => {
-    if (ev.key === 'Enter') doAsk();
-  });
+  const btn = document.getElementById('btn-ask');
+  if (btn) btn.addEventListener('click', () => doAsk());
+  const input = document.getElementById('qa-question');
+  if (input) {
+    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') doAsk(); });
+  }
   document.querySelectorAll('.chip[data-q]').forEach(chip => {
     chip.addEventListener('click', () => doAsk(chip.getAttribute('data-q')));
   });

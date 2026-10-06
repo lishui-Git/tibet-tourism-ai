@@ -1,11 +1,22 @@
 {% extends "base.html" %}
 {% block title %}数据总览 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}M1 数据总览：规模、评分分布、时间趋势、分档与客源地{% endblock %}
+{% block subtitle %}评论规模、评分分布、时间趋势与游客来源{% endblock %}
 
 {% block content %}
+
+<section class="page-head">
+  <h2>数据总览</h2>
+  <p class="lead">
+    先看整体情况：这批评论覆盖多少景点、游客打分集中在什么水平、
+    评论量随时间如何变化、游客都从哪里来。
+  </p>
+</section>
+
 <section class="card">
-  <h2>一、数据集规模与评分分布</h2>
-  <div id="ov-summary" class="stat-grid"></div>
+  <h2>规模与评分分布</h2>
+  <div id="ov-summary" class="stat-grid">
+    <div class="stat"><span class="stat-label">加载中…</span></div>
+  </div>
   <div class="chart-row">
     <div id="chart-score" class="chart"></div>
     <div id="chart-scope" class="chart"></div>
@@ -14,30 +25,32 @@
 </section>
 
 <section class="card">
-  <h2>二、评论量时间趋势</h2>
+  <h2>评论量随时间的变化</h2>
   <p class="hint">
-    粒度：
-    <select id="trend-granularity">
+    统计口径：
+    <select id="trend-granularity" aria-label="时间粒度">
       <option value="year">按年</option>
       <option value="month">按月</option>
     </select>
+    　反映的是<strong>评论发布量</strong>的变化，不代表实际客流量。
   </p>
   <div id="chart-trend" class="chart chart-wide"></div>
   <div id="ov-trend-note"></div>
 </section>
 
 <section class="card">
-  <h2>三、景点评论量分档</h2>
+  <h2>景点热度分档</h2>
+  <p class="hint">按评论量把景点分档，看看有多少景点属于"热门"、多少属于"冷门"。</p>
   <div id="chart-bucket" class="chart chart-wide"></div>
   <div id="ov-bucket-table"></div>
 </section>
 
 <section class="card">
-  <h2>四、客源地分布</h2>
+  <h2>游客来源地区分布</h2>
   <p class="hint">
-    仅统计发布时间 ≥ 2022-08-01 的评论（携程自该日期起才展示 IP 归属地）。
+    仅统计平台开始展示 IP 归属地之后的评论，因此有效样本量小于评论总数。
     显示前
-    <select id="prov-limit">
+    <select id="prov-limit" aria-label="显示地区数量">
       <option value="10">10</option>
       <option value="20" selected>20</option>
       <option value="30">30</option>
@@ -49,8 +62,11 @@
 </section>
 
 <section class="card">
-  <h2>五、数据来源与已知局限</h2>
-  <div id="ov-data-note"></div>
+  <h2>数据来源与已知局限</h2>
+  <details class="fold" open>
+    <summary>展开查看</summary>
+    <div id="ov-data-note" class="fold-body"></div>
+  </details>
 </section>
 {% endblock %}
 

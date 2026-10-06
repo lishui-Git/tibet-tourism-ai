@@ -1,10 +1,14 @@
-/* 数据总览页（M1）：规模与评分分布、时间趋势、分档、客源地、数据说明。
-   数据全部来自已落库的离线分析结果（Spark 统计），本页不发任何模型调用。 */
+/* 数据总览页：规模与评分分布、时间趋势、分档、客源地、数据说明。
+   数据全部来自已落库的离线分析结果，本页不发任何模型调用。
+
+   【文案纪律】面向普通用户：不出现内部规则编号（BR-xx）、字段名（image_count）、
+   实现名称（Spark 等）。口径说明由接口返回并由 `caliberNote` 原样展示——
+   那是业务口径，属于用户需要知道的信息。 */
 
 /** 评分分布：饼图 + 环形（1–5 星）。 */
 function renderScoreChart(dist, total) {
   return {
-    title: { text: `评分分布（共 ${fmtInt(total)} 条有评分评论）`, left: 'center', textStyle: { fontSize: 14 } },
+    title: { text: `评分分布（共 ${fmtInt(total)} 条有评分评论）`, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } },
     tooltip: {
       trigger: 'item',
       formatter: p => `${p.name}：${fmtInt(p.value)} 条（${p.percent}%）`,
@@ -12,17 +16,21 @@ function renderScoreChart(dist, total) {
     legend: { bottom: 0 },
     series: [{
       type: 'pie',
-      radius: ['40%', '68%'],
+      radius: ['42%', '68%'],
       label: { formatter: '{b}\n{d}%' },
-      data: dist.map(d => ({ name: `${d.score} 星`, value: d.count })),
+      data: dist.map((d, i) => ({
+        name: `${d.score} 星`,
+        value: d.count,
+        itemStyle: { color: ['#b3352f', '#d4773f', '#c9a227', '#6fa26b', '#2f7d4f'][d.score - 1] || CHART_COLORS[i % CHART_COLORS.length] },
+      })),
     }],
   };
 }
 
-/** 来源口径构成：西藏 / 进藏沿线。 */
+/** 所属范围构成：西藏 / 进藏沿线。 */
 function renderScopeChart(scope) {
   return {
-    title: { text: '景点来源口径构成', left: 'center', textStyle: { fontSize: 14 } },
+    title: { text: '景点所属范围构成', left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } },
     tooltip: { trigger: 'axis' },
     legend: { bottom: 0 },
     grid: { left: 70, right: 30, top: 50, bottom: 50 },
@@ -37,7 +45,7 @@ function renderScopeChart(scope) {
 
 function renderTrendChart(points, granularity) {
   return {
-    title: { text: `评论量趋势（按${granularity === 'year' ? '年' : '月'}）`, left: 'center', textStyle: { fontSize: 14 } },
+    title: { text: `评论量趋势（按${granularity === 'year' ? '年' : '月'}）`, left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } },
     tooltip: { trigger: 'axis' },
     grid: { left: 70, right: 40, top: 50, bottom: 60 },
     xAxis: { type: 'category', data: points.map(p => p.period), axisLabel: { rotate: 45 } },
@@ -46,7 +54,7 @@ function renderTrendChart(points, granularity) {
       name: '评论量',
       type: 'line',
       smooth: true,
-      areaStyle: { opacity: 0.15 },
+      areaStyle: { opacity: 0.12 },
       data: points.map(p => p.review_count),
       itemStyle: { color: CHART_COLORS[0] },
     }],
@@ -55,7 +63,7 @@ function renderTrendChart(points, granularity) {
 
 function renderBucketChart(buckets) {
   return {
-    title: { text: '景点评论量分档', left: 'center', textStyle: { fontSize: 14 } },
+    title: { text: '景点评论量分档', left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } },
     tooltip: { trigger: 'axis' },
     grid: { left: 70, right: 40, top: 50, bottom: 50 },
     xAxis: { type: 'category', data: buckets.map(b => b.bucket) },
@@ -64,7 +72,7 @@ function renderBucketChart(buckets) {
       name: '景点数',
       type: 'bar',
       data: buckets.map(b => b.spot_count),
-      itemStyle: { color: CHART_COLORS[5] },
+      itemStyle: { color: CHART_COLORS[4] },
       label: { show: true, position: 'top' },
     }],
   };
@@ -73,7 +81,7 @@ function renderBucketChart(buckets) {
 function renderProvinceChart(points) {
   const sorted = points.slice().sort((a, b) => a.review_count - b.review_count);
   return {
-    title: { text: '客源地分布（2022-08 之后样本）', left: 'center', textStyle: { fontSize: 14 } },
+    title: { text: '游客来源地区分布', left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } },
     tooltip: {
       trigger: 'axis',
       formatter: p => {
@@ -87,7 +95,7 @@ function renderProvinceChart(points) {
     series: [{
       type: 'bar',
       data: sorted.map(p => p.review_count),
-      itemStyle: { color: CHART_COLORS[2] },
+      itemStyle: { color: CHART_COLORS[0] },
     }],
   };
 }
@@ -98,17 +106,17 @@ async function loadSummary() {
     const data = await apiGet('/api/overview/summary');
     const t = data.totals;
     box.innerHTML = window.UI.statCards([
-      { label: '评论总数', value: fmtInt(t.review_count), sub: `去重后 ${fmtInt(t.dedup_review_count)}` },
-      { label: '景点总数', value: fmtInt(t.spot_count), sub: `西藏 ${t.spot_tibet} / 进藏沿线 ${t.spot_route}` },
-      { label: '具备完整评价资格', value: fmtInt(t.spot_ge100), sub: '评论量 ≥100 条（BR-02）' },
-      { label: '低信息量评论', value: fmtInt(t.low_info_count), sub: '正文 ≤10 字（BR-05）' },
-      { label: '重复正文', value: fmtInt(t.dup_count), sub: `${fmtInt(t.dup_group_count)} 组（BR-06）` },
-      { label: '有图评论', value: fmtInt(t.image_review_count), sub: 'image_count > 0' },
-      { label: '归属地未知', value: fmtInt(t.ip_unknown_count), sub: '2022-08 前占多数' },
-      { label: '无评分评论', value: fmtInt(t.score_null_count), sub: '评分统计单独口径' },
+      { label: '评论总数', value: fmtInt(t.review_count), sub: `去重后 ${fmtInt(t.dedup_review_count)} 条` },
+      { label: '景点总数', value: fmtInt(t.spot_count), sub: `西藏 ${fmtInt(t.spot_tibet)} · 进藏沿线 ${fmtInt(t.spot_route)}` },
+      { label: '可生成完整评价', value: fmtInt(t.spot_ge100), sub: '评论量达到 100 条的景点' },
+      { label: '短评论', value: fmtInt(t.low_info_count), sub: '正文不超过 10 字' },
+      { label: '内容重复评论', value: fmtInt(t.dup_count), sub: `涉及 ${fmtInt(t.dup_group_count)} 组重复内容` },
+      { label: '带图评论', value: fmtInt(t.image_review_count), sub: '游客上传了图片的评论' },
+      { label: '来源地区未知', value: fmtInt(t.ip_unknown_count), sub: '平台未展示归属地的评论' },
+      { label: '未评分评论', value: fmtInt(t.score_null_count), sub: '游客未打分的评论' },
     ]);
     initChart('chart-score', renderScoreChart(data.score_distribution, data.scored_total));
-    // 来源口径构成来自 /api/overview/distribution（summary 不含该字段）
+    // 所属范围构成来自 /api/overview/distribution（summary 不含该字段）
     document.getElementById('ov-summary-note').innerHTML = caliberNote(data.caliber_note, data.sample_size);
   } catch (e) {
     showError('ov-summary', e);

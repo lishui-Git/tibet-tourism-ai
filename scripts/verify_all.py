@@ -65,6 +65,7 @@ SUITES: tuple[tuple[str, str, bool], ...] = (
     ("check_docs_facts.py", "文档事实核对（手册命令可解析 + 基线数字与库一致）", False),
     ("test_cli_guards.py", "运行安全闸门（规模确认 / mock 上限 / 离线阻断 / 客户端构造）", False),
     ("check_page_bindings.py", "页面绑定（JS 引用的元素 id 在模板/脚本里都存在）", False),
+    ("test_frontend_redesign.py", "前台改版验收（导航结构/无开发者语言/整合页/对比拦截/错误页）", False),
     ("test_readonly_api.py", "只读架构实证（访问全部只读接口后数据逐表未变）", False),
     ("test_server_startup.py", "真实进程启动验证（python run.py；页面/接口/静态资源走真实 HTTP）", False),
     ("test_spark_readonly.py", "阶段三可复现性（Spark 只读跑一遍，库一行未变；缺大数据环境则跳过）", True),

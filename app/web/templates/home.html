@@ -1,48 +1,167 @@
 {% extends "base.html" %}
 {% block title %}首页 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}离线智能分析结果查询平台 · 首页{% endblock %}
+{% block subtitle %}把 5.9 万条游客评论变成可读的景点评价{% endblock %}
 
 {% block content %}
-<section class="card">
-  <h2>本系统在做什么</h2>
-  <p class="hint">
-    对「西藏及进藏沿线（川藏／滇藏／青藏线）」旅游景点评论做<strong>离线</strong>智能分析，
-    再把结果持久化到数据库，供本平台查询与展示。
-  </p>
-  <div class="flow">
-    <div class="flow-step"><b>① 数据采集与清洗</b><span>59,033 条评论 / 837 个景点</span></div>
-    <div class="flow-arrow">→</div>
-    <div class="flow-step"><b>② Spark 离线分析</b><span>统计聚合 · MLlib 情感基线 · LDA 主题</span></div>
-    <div class="flow-arrow">→</div>
-    <div class="flow-step"><b>③ DeepSeek 语义分析</b><span>评论语义结构化 · 事实包 · 景点评价</span></div>
-    <div class="flow-arrow">→</div>
-    <div class="flow-step"><b>④ Web 只读查询</b><span>本平台：查统计、看评价、做对比</span></div>
+
+{#
+  首屏 Hero
+  ============================================================================
+  背景是**原创矢量插画**（雪山／冰川湖／布达拉宫剪影），不是下载的照片——
+  版权干净、体积极小、放多大都清晰。
+  文字压在深色蒙版上，保证对比度：这里承载"系统是什么"和四个关键数字。
+#}
+<section class="hero" data-art-box>
+  <img class="hero-art" src="{{ url_for('static', filename='img/tibet-hero.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="hero-veil" aria-hidden="true"></div>
+
+  <div class="hero-inner">
+    <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
+    <h2>读懂每一条游客评论，看清每个景点的真实口碑</h2>
+    <p class="hero-sub">
+      汇集西藏及进藏沿线景点的游客评论，从评论中提炼评分分布、情感倾向、
+      游客关注点与不足之处，帮助旅行者与管理者了解每个景点"游客到底怎么说"。
+    </p>
+    <p class="hero-scope">覆盖范围：西藏及进藏沿线（川藏／滇藏／青藏线）· 全部结论均来自真实评论数据</p>
+
+    {# 关键数据直接落在首屏：数字由接口填充，不硬编码 #}
+    <div class="hero-kpis" id="hero-kpis">
+      <div class="hero-kpi"><span class="k-label">加载中…</span><span class="k-value">—</span></div>
+    </div>
+
+    <div class="hero-actions">
+      <a class="btn-hero" href="/overview">进入数据总览</a>
+      <a class="btn-hero ghost" href="/smart">直接看景点评价</a>
+    </div>
   </div>
-  <div class="alert">
-    <strong>关键设计：</strong>DeepSeek 只在<strong>离线阶段</strong>把评论语义结构化并落库；
-    本平台<strong>只读数据库</strong>，页面刷新<strong>不会</strong>触发任何模型调用——
-    因此结果可复现、响应稳定、成本可控。
+  <div class="flagline" aria-hidden="true"></div>
+</section>
+
+{# 核心数据：比普通统计卡更醒目（左侧强调条 + 大号数字） #}
+<section class="card">
+  <div class="section-title">
+    <h2>数据规模</h2>
+    <span class="st-sub">以下是本系统当前已收录并完成分析的数据量</span>
+  </div>
+  <div class="kpi-row" id="home-kpis">
+    <div class="kpi"><span class="kpi-value">—</span><span class="kpi-label">加载中…</span></div>
+  </div>
+  <p id="home-summary-note" class="hint"></p>
+</section>
+
+{# 系统能做什么：深色分区，与上下的浅色卡片形成节奏 #}
+<section class="band">
+  <div class="section-title">
+    <h2>系统能做什么</h2>
+    <span class="st-sub">四个入口，无需登录</span>
+  </div>
+  <div class="entries">
+    <a class="entry" href="/overview">
+      <div class="entry-title"><span class="idx">01</span>数据总览</div>
+      <p class="entry-desc">看整体盘子：评论规模、评分分布、逐年趋势、景点热度分档与游客来源地区。</p>
+      <div class="entry-more">查看总览 →</div>
+    </a>
+    <a class="entry" href="/spots">
+      <div class="entry-title"><span class="idx">02</span>景点分析</div>
+      <p class="entry-desc">按评论量、评分、好评率排行，检索任意景点，查看它的情感分布、时间趋势与代表评论。</p>
+      <div class="entry-more">进入分析 →</div>
+    </a>
+    <a class="entry" href="/smart">
+      <div class="entry-title"><span class="idx">03</span>智能分析</div>
+      <p class="entry-desc">查询单个景点的综合评价与游客关注点，也可以直接用自然语言提问，系统基于评论数据作答。</p>
+      <div class="entry-more">开始智能分析 →</div>
+    </a>
+    <a class="entry" href="/compare">
+      <div class="entry-title"><span class="idx">04</span>景点对比</div>
+      <p class="entry-desc">任选两个景点，逐项对照评论量、平均评分、好评率、差评率，看清差距在哪里。</p>
+      <div class="entry-more">开始对比 →</div>
+    </a>
   </div>
 </section>
 
+{#
+  西藏景点视觉展示
+  ============================================================================
+  插画为原创矢量图，只服务视觉；卡片上的数字全部来自真实统计接口。
+  若插画文件缺失或加载失败，`<img>` 会退化为卡片底色，布局不受影响。
+#}
 <section class="card">
-  <h2>数据概况</h2>
-  <div id="home-stats" class="stat-grid">
-    <div class="stat"><span class="stat-label">加载中…</span></div>
+  <div class="section-title">
+    <h2>高原上的热门景点</h2>
+    <span class="st-sub">点击任意景点，查看它的评价与分析</span>
   </div>
-  <div id="home-note"></div>
+  <div class="scenic-grid" id="home-scenic">
+    <div class="hint">加载中…</div>
+  </div>
 </section>
 
+{# 热门景点榜单（评论量） #}
 <section class="card">
-  <h2>结果生产状态（如实展示，避免误读）</h2>
-  <p class="hint">分析结果是分批生产的，页面对"尚未生产"的数据会明确说明，而不是编造数字。</p>
+  <div class="section-title">
+    <h2>评论量排行</h2>
+    <span class="st-sub">游客讨论最多的景点</span>
+  </div>
+  <div class="rank-list" id="home-hot">
+    <div class="hint">加载中…</div>
+  </div>
+</section>
+
+{# 分析结果生成情况：如实说明哪些结果已经生成、哪些还没生成（不伪造） #}
+<section class="card">
+  <div class="section-title">
+    <h2>分析结果生成情况</h2>
+    <span class="st-sub">尚未生成的部分会明确说明，不会用估算值代替</span>
+  </div>
   <div id="home-coverage"></div>
 </section>
 
+{# 技术说明统一降到折叠区：普通用户不需要看，答辩时可展开 #}
 <section class="card">
-  <h2>系统运行自检</h2>
-  <button id="btn-check" type="button">运行数据库自检</button>
-  <pre id="check-out" class="out">点击上方按钮检查「Flask 运行 / MySQL 连接 / 17 张表在位」…</pre>
+  <div class="section-title">
+    <h2>关于本系统</h2>
+  </div>
+  <details class="fold">
+    <summary>分析结果是怎么来的？为什么浏览页面不产生费用？</summary>
+    <div class="fold-body">
+      <p>
+        系统对采集到的景点评论做<strong>离线</strong>智能分析：先用分布式计算完成全量统计聚合，
+        再由大语言模型对评论正文做语义结构化（提取情感倾向、游客关注的方面、代表性观点），
+        结果统一写入数据库。
+      </p>
+      <p>
+        本平台<strong>只读取已经生成好的结果</strong>，不在你浏览时调用任何模型。
+        因此无论刷新多少次页面，结果都完全一致、响应稳定，也不会产生额外费用——
+        这正是测评类系统该有的行为：<strong>结论可复现</strong>。
+      </p>
+      <div class="flow">
+        <div class="flow-step"><b>① 评论采集与清洗</b><span>去重、剔除无信息量短评</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><b>② 离线统计与情感基线</b><span>全量评论的聚合指标</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><b>③ 大模型语义结构化</b><span>情感、方面、关注点</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><b>④ 结果入库与查询</b><span>本平台只读展示</span></div>
+      </div>
+      <p class="hint">
+        首页插画为系统自绘的矢量图（雪山、冰川湖、布达拉宫剪影），
+        用于呈现地域特征，不涉及第三方图片授权。
+      </p>
+    </div>
+  </details>
+  <details class="fold">
+    <summary>统计口径与已知局限</summary>
+    <div class="fold-body">
+      <p id="home-caliber">加载中…</p>
+      <ul class="limits">
+        <li>评论为历史快照，不含实时数据。</li>
+        <li>时间趋势反映的是<strong>评论量</strong>变化，不代表实际客流量。</li>
+        <li>客源地仅统计平台展示 IP 归属地之后的评论，有效样本量小于评论总数。</li>
+        <li>评论量不足 100 条的景点不生成完整智能评价，只提供基础统计。</li>
+        <li>某个方面的有效样本不足 10 条时，只展示样本量、不给出结论。</li>
+      </ul>
+    </div>
+  </details>
 </section>
 {% endblock %}
 

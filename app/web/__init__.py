@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import secrets
 
-from flask import Flask, request
+from flask import Flask, render_template, request
 
 from app.config import settings
 
@@ -78,8 +78,45 @@ def create_app() -> Flask:
     app.register_blueprint(qa_bp)
     app.register_blueprint(admin_bp)
 
+    _register_template_context(app)
     _register_error_handlers(app)
     return app
+
+
+# 路径前缀 → 一级导航的 data-nav 标识（用于高亮当前栏目）
+_NAV_BY_PREFIX = (
+    ("/overview", "overview"),
+    ("/spots", "spots"),
+    ("/smart", "smart"),
+    ("/evaluation", "smart"),   # 兼容旧地址
+    ("/qa", "smart"),           # 兼容旧地址
+    ("/compare", "compare"),
+    ("/admin", "admin"),
+    ("/tasks", "admin"),        # 兼容旧地址
+    ("/login", "login"),
+)
+
+
+def _register_template_context(app: Flask) -> None:
+    """把模板需要的公共变量注入 Jinja 上下文。
+
+    为什么需要：`base.html` 要在**每个页面**上判断"当前是否已登录"（决定导航右侧显示
+    『管理员』还是『管理后台』）并高亮当前栏目。逐个视图传参既啰嗦又容易漏，
+    因此统一在这里注入。
+    """
+
+    @app.context_processor
+    def _inject():  # noqa: ANN202
+        from app.web.routes._auth_helpers import current_user
+
+        path = request.path or "/"
+        active = "home" if path == "/" else ""
+        for prefix, nav in _NAV_BY_PREFIX:
+            if path.startswith(prefix):
+                active = nav
+                break
+        return {"current_user": current_user(), "active_nav": active}
+
 
 
 def _register_error_handlers(app: Flask) -> None:
@@ -106,17 +143,32 @@ def _register_error_handlers(app: Flask) -> None:
     @app.errorhandler(404)
     def _api_404(error):  # noqa: ANN001, ARG001
         if not _wants_json_envelope():
-            return error
+            # 页面路径：渲染友好的 404 页，而不是 Flask 默认的英文 "Not Found"。
+            # 普通用户不该看到框架默认页；技术信息保留在开发日志里。
+            return render_template("error.html",
+                                   code=404, title="页面不存在",
+                                   detail="你访问的地址不存在，可能链接有误或页面已调整。"), 404
         return fail(CODE_NOT_FOUND, "请求的接口路径不存在")
 
     @app.errorhandler(405)
     def _api_405(error):  # noqa: ANN001, ARG001
         if not _wants_json_envelope():
-            return error
+            return render_template("error.html",
+                                   code=405, title="请求方式不正确",
+                                   detail="请通过页面上的正常入口访问该功能。"), 405
         return fail(
             CODE_PARAM_INVALID,
             f"请求方法不被允许：{request.method} {request.path}",
         )
+
+    @app.errorhandler(500)
+    def _api_500(error):  # noqa: ANN001, ARG001
+        # 500 一律不向前台暴露异常内容（堆栈只进日志），避免把内部实现泄给用户。
+        if not _wants_json_envelope():
+            return render_template("error.html",
+                                   code=500, title="服务器内部错误",
+                                   detail="系统处理该请求时出现异常，请稍后重试。"), 500
+        return fail(5003, "服务器内部错误，请稍后重试")
 
 
 __all__ = ["create_app"]

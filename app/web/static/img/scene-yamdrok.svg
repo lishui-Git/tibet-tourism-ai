@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  原创矢量插画：羊卓雍措（碧玉湖 + 曲线湖岸 + 远雪山）
+  全手写 SVG，无第三方素材。以"多层湖蓝色阶 + 蜿蜒岸线"表现高原湖泊的层次。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" preserveAspectRatio="xMidYMid slice"
+     role="img" aria-label="羊卓雍措：碧玉色高原湖泊插画">
+  <defs>
+    <linearGradient id="yz-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d3d61"/>
+      <stop offset="50%" stop-color="#3f8fb0"/>
+      <stop offset="100%" stop-color="#d3e8ec"/>
+    </linearGradient>
+    <linearGradient id="yz-far" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#cfe2ea"/>
+      <stop offset="100%" stop-color="#829fb4"/>
+    </linearGradient>
+    <linearGradient id="yz-mid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5c8399"/>
+      <stop offset="100%" stop-color="#2f5468"/>
+    </linearGradient>
+    <!-- 碧玉湖：核心色，偏青绿，区别于普通蓝色湖泊 -->
+    <linearGradient id="yz-lake" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#63c2bf"/>
+      <stop offset="38%" stop-color="#2e9a9c"/>
+      <stop offset="74%" stop-color="#1a6f7d"/>
+      <stop offset="100%" stop-color="#0d4a5c"/>
+    </linearGradient>
+    <linearGradient id="yz-near" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a6b7d"/>
+      <stop offset="100%" stop-color="#1b3c4b"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="420" fill="url(#yz-sky)"/>
+
+  <!-- 远雪山 -->
+  <path d="M0 200 L84 138 L150 182 L248 108 L340 190 L420 148 L508 204 L584 164 L640 198 L640 420 L0 420 Z"
+        fill="url(#yz-far)"/>
+  <path d="M248 108 L312 174 L284 174 L262 142 L240 172 L212 172 Z" fill="#ffffff"/>
+
+  <!-- 中景山体（湖的远岸） -->
+  <path d="M0 254 L120 222 L228 252 L352 218 L470 254 L578 226 L640 250 L640 420 L0 420 Z"
+        fill="url(#yz-mid)"/>
+
+  <!-- 湖体：蜿蜒岸线，中段向外凸出 -->
+  <path d="M0 300 C120 284 190 306 268 298 C356 288 420 310 512 300 C566 294 604 302 640 296
+           L640 420 L0 420 Z" fill="url(#yz-lake)"/>
+  <!-- 浅滩（更亮的一层，贴近岸线） -->
+  <path d="M0 300 C120 284 190 306 268 298 C356 288 420 310 512 300 C566 294 604 302 640 296
+           L640 318 C604 324 566 316 512 322 C420 332 356 310 268 320 C190 328 120 306 0 322 Z"
+        fill="#8fd8d2" opacity="0.42"/>
+
+  <!-- 湖面反光与波纹 -->
+  <g fill="#ffffff" opacity="0.24">
+    <rect x="70"  y="336" width="130" height="3" rx="1.5"/>
+    <rect x="270" y="352" width="104" height="3" rx="1.5"/>
+    <rect x="430" y="340" width="150" height="3" rx="1.5"/>
+    <rect x="160" y="380" width="180" height="3" rx="1.5"/>
+    <rect x="470" y="392" width="120" height="3" rx="1.5"/>
+  </g>
+
+  <!-- 前景湖岸（压暗，形成三层纵深） -->
+  <path d="M0 392 C90 380 180 396 270 388 C380 378 470 396 560 386 C600 382 622 388 640 384
+           L640 420 L0 420 Z" fill="url(#yz-near)"/>
+
+  <!-- 岸边经幡（一处点缀） -->
+  <g transform="translate(556 258)">
+    <path d="M0 0 L0 46" stroke="#e7e0d2" stroke-width="1.8"/>
+    <path d="M0 6 L-72 30" stroke="#e7e0d2" stroke-width="1.3" opacity="0.9"/>
+    <rect x="-64" y="9"  width="12" height="17" fill="#d9a227" opacity="0.94" transform="rotate(-19 -58 17)"/>
+    <rect x="-38" y="18" width="12" height="17" fill="#2f7d4f" opacity="0.94" transform="rotate(-19 -32 26)"/>
+    <rect x="-12" y="27" width="12" height="17" fill="#2f6fa5" opacity="0.94" transform="rotate(-19 -6 35)"/>
+  </g>
+</svg>
