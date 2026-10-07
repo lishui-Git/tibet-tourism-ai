@@ -680,8 +680,15 @@ def spot_report(spot_id: int) -> dict[str, Any] | None:
         },
         "basis": basis,
         "need_review": bool(report["need_review"]),
+        # 【措辞克制化】旧文案"存在与事实包不一致的数字"容易被误读成"这份评价是错的"。
+        # 实测 41/57 份带此标记，而逐条归因表明 136 个"未命中"数字**全部可在数据依据中找到**
+        # （多为日期、点赞数、介绍文本里的数字——它们不在校验器的"可引用数字清单"里），
+        # 并非模型自造。因此文案改为**解释性**表述，并明确"不代表评价有误"。
         "need_review_note": (
-            "该评价在生成时存在与事实包不一致的数字，已标记待人工复核。" if report["need_review"] else None
+            "系统已对评价中的数字做自动核对：其中若干数字未在下方「数据依据」的清单中直接命中"
+            "（多见于日期、点赞数等），因此按保守策略标记为「待人工复核」。"
+            "这不代表评价有误——评价内容与全部结果均已正常生成并入库。"
+            if report["need_review"] else None
         ),
         "model": report["model"],
         "prompt_version": report["prompt_version"],

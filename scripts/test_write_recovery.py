@@ -137,7 +137,7 @@ def snapshot_comment(comment_id: int) -> dict:
         (comment_id,),
     )
     aspects = query_all(
-        "SELECT aspect_name, polarity, evidence FROM aspect "
+        "SELECT aspect_name, polarity, evidence, created_at FROM aspect "
         "WHERE comment_id=%s AND method='deepseek' ORDER BY aspect_name, evidence",
         (comment_id,),
     )
@@ -171,13 +171,19 @@ def restore_comment(comment_id: int, snap: dict) -> None:
                 ),
             )
             # 方面行：先清后按快照重建（与 write_records 的"先删后插"同口径）
+            #
+            # 【隔离保真修正】必须写回**快照里的 created_at**，不能再用 `NOW()`。
+            # 旧实现用 NOW() 会把这些方面行的 created_at 改成"测试运行时刻"——
+            # 行数不变、业务字段不变，但生产数据的**时间戳被静默改写**，
+            # 与"逐字段精确还原"的承诺不符（用 `aspect` 的内容级摘要才检得出来）。
             cur.execute("DELETE FROM aspect WHERE comment_id=%s", (comment_id,))
             for row in snap["aspects"]:
                 cur.execute(
                     "INSERT INTO aspect (comment_id, spot_id, aspect_name, polarity, evidence, method, created_at) "
-                    "SELECT %s, spot_id, %s, %s, %s, 'deepseek', NOW() FROM sentiment "
+                    "SELECT %s, spot_id, %s, %s, %s, 'deepseek', %s FROM sentiment "
                     "WHERE comment_id=%s AND method='deepseek'",
-                    (comment_id, row["aspect_name"], row["polarity"], row["evidence"], comment_id),
+                    (comment_id, row["aspect_name"], row["polarity"], row["evidence"],
+                     row["created_at"], comment_id),
                 )
 
 
@@ -348,9 +354,11 @@ def main() -> int:
           after_restore["semantic"]["keywords"] == snap["semantic"]["keywords"]
           and after_restore["semantic"]["summary"] == snap["semantic"]["summary"]
           and after_restore["semantic"]["source"] == snap["semantic"]["source"], "")
-    check("还原后 aspect 行集合一致",
-          [(a["aspect_name"], a["polarity"], a["evidence"]) for a in after_restore["aspects"]]
-          == [(a["aspect_name"], a["polarity"], a["evidence"]) for a in snap["aspects"]],
+    check("还原后 aspect 行集合**逐字段**一致（含 created_at，防止时间戳被 NOW() 静默改写）",
+          [(a["aspect_name"], a["polarity"], a["evidence"], str(a["created_at"]))
+           for a in after_restore["aspects"]]
+          == [(a["aspect_name"], a["polarity"], a["evidence"], str(a["created_at"]))
+              for a in snap["aspects"]],
           f"{len(after_restore['aspects'])} 条")
     after_rows = table_counts()
     check("还原后结果表行数与测试前完全一致", after_rows == before_rows,

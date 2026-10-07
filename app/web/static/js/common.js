@@ -88,16 +88,17 @@ function techDetails(technical) {
       <div class="fold-body"><pre class="out">${escapeHtml(String(technical))}</pre></div></details>`;
 }
 
-/** 「暂未生成」时的说明块（带粗体标题 + 可选技术详情）。
+/** 「不可用」时的说明块（带粗体标题 + 可选技术详情）。
  *
- * 【临时性 UI，需在数据生产完成后移除】
- * 在「景点综合智能评价」尚未生成期间，首页 / 智能分析 / 景点对比都需要向用户说明
- * "这项还没生成、但其他内容仍可用"。为避免同一段话在几处各写一遍、将来漏改其中一处，
- * 组装逻辑集中在这里。
+ * 【用途已收敛，不是死代码】原本有三个场景用它：① 评价尚未生成、② 评论量不足门槛、
+ * ③ 对比解读未开启。**2026-10-07 全量生产完成后，场景 ① 已不再出现**
+ * （57 个合格景点的评价均已生成）。但**场景 ② 仍然长期可达**：
+ * 837 个景点里只有 57 个评论量 ≥100，其余 780 个会走
+ * "评论量不足，不生成综合评价"这条正常业务分支（BR-02/BR-03）。
+ * 因此本函数**必须保留**，不得按"评价已生成完"删除。
  *
- * **移除时机**：全量评价生成完毕、`/api/overview/summary` 的
- * `coverage.report.reports_generated` 达到 `spots_ge100` 之后，
- * 删除本函数与 `window.UI.pendingNotice` 的各调用点即可。
+ * **唯一的移除条件**：如果哪天产品决定"评论量不足的景点也不再提示"，
+ * 才删除本函数与 `window.UI.pendingNotice` 的各调用点。
  */
 function pendingNotice(title, hint, technical) {
   const head = `<div class="alert warn"><strong>${escapeHtml(title)}</strong>`

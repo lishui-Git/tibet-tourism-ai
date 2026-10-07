@@ -180,7 +180,7 @@
 | `/qa` | **301** → `/smart?tab=qa` |
 | `/tasks` | **302** → `/admin`（未登录先跳 `/login`） |
 
-> 路由实测：**API 27 个** + 页面/自检 10 个（另有 3 个旧地址重定向与 `/static/<path>`）。
+> 路由实测：**API 27 个** + 页面/自检 11 个（含 3 个旧地址重定向与 `/healthz`；另有 `/static/<path>`）。
 > `/this-page-does-not-exist` 等未知页面返回**中文 404 页**（`error.html`），
 > 而不是框架默认的英文 "Not Found"；`/api/**` 的 404/405 仍返回统一 JSON 信封。
 

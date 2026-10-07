@@ -155,7 +155,10 @@ function renderAvailable(data, box) {
     </div>
 
     <h3>数据依据</h3>
-    <p class="hint">上述评价只允许引用以下数字，不允许引入评论之外的信息。</p>
+    <p class="hint">上述评价只允许引用以下数字，不允许引入评论之外的信息。${(basis.source === 'fact_package' && basis.version)
+      ? `依据来源：离线事实数据快照 ${escapeHtml(String(basis.version))}${basis.generated_at
+        ? `（生成于 ${escapeHtml(String(basis.generated_at).slice(0, 16))}）` : ''}，可逐项回溯。`
+      : ''}</p>
     ${window.UI.statCards([
       { label: '评论量', value: fmtInt(basis.review_count), sub: '条' },
       { label: '平均评分', value: fmtNum(basis.avg_score, 2), sub: '满分 5 分' },

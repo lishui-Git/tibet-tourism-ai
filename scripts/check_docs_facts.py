@@ -154,7 +154,10 @@ def check_baseline(doc: str) -> None:
         check(f"基线「{key}」= {want:,}", actual[key] == want, f"实际 {actual[key]:,}")
 
     # 手册文字里也必须出现这些数字（避免"库对了但手册没更新"）
-    for text in ("59,033", "837", "10,228", "47,702", "1,071", "10,259", "17 张"):
+    # 【2026-10-07 更新】`10,259` / `60` 是"全量前"的旧基线，已在手册中修正为
+    # `59,030`（sentiment deepseek 与 comment_semantic）与 `91,280`（aspect）——
+    # 本列表随之更新，否则会一直要求手册保留一个已经错误的数字。
+    for text in ("59,033", "837", "10,228", "47,702", "1,071", "59,030", "91,280", "17 张"):
         check(f"手册文字含『{text}』", text in doc, "")
 
 
@@ -172,9 +175,11 @@ def check_routes(doc: str) -> None:
     )
     print(f"      · API 路由 {len(api)} 个；页面/自检路由 {len(pages)} 个")
     check("API 路由数 ≥ 27（手册口径）", len(api) >= 27, f"实际 {len(api)}")
-    check("页面与自检路由数 ≥ 9（手册口径）", len(pages) >= 9, f"实际 {len(pages)}")
+    check("页面与自检路由数 ≥ 11（手册口径）", len(pages) >= 11, f"实际 {len(pages)}")
     # 手册必须提到这两类规模
-    check("手册写明了接口/页面规模", "27 个 API 路由" in doc and "9 个页面" in doc, "")
+    # 【口径修正】实测为 11 个（含 3 个旧地址重定向与 /healthz）；
+    # 旧字面值 "9 个页面" 是前台改版前的计数，与实测不符，已随手册一并更正。
+    check("手册写明了接口/页面规模", "27 个 API 路由" in doc and "11 个页面" in doc, "")
 
 
 def check_index_freshness() -> None:
