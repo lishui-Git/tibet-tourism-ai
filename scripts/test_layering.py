@@ -24,6 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 sys.path.insert(0, ".")
 
+from app.db import query_one
 from app.llm.preflight import collect
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -54,8 +55,27 @@ def main() -> int:
           f"{analyzable} + {counts['empty_content']} = {counts['review_total']}")
     check("规则层总量 = 低信息量计数（BR-05 口径一致）",
           rule == counts["low_info_total"], f"{rule} vs {counts['low_info_total']}")
-    check("复用层总量 = 待复用成员数（BR-06 口径一致）",
-          reuse == counts["reuse_pending"], f"{reuse} vs {counts['reuse_pending']}")
+    # 【口径修正】"复用层总量"是**结构量**（重复组里"非代表 且 非低信息量"的成员数），
+    # 它与"这些成员**处理了没有**"无关。原断言写的是 `reuse == reuse_pending`，
+    # 只有在"一条都还没处理"时才成立；全量跑完（或复用被复原）后 pending=0，旧断言必然失败。
+    # 改为**独立 SQL 复算结构量**，这样既与处理状态解耦，又是真正的交叉验证。
+    reuse_indep = int(
+        query_one(
+            """
+            SELECT COUNT(*) AS n FROM review r
+              JOIN (SELECT g.dup_group_id, g.comment_id AS rep_id
+                      FROM (SELECT comment_id, dup_group_id, is_low_info, content_length,
+                                   ROW_NUMBER() OVER (PARTITION BY dup_group_id
+                                       ORDER BY is_low_info ASC, content_length DESC, comment_id ASC) AS rn
+                              FROM review WHERE is_dup_content = 1 AND dup_group_id IS NOT NULL) g
+                     WHERE g.rn = 1) rep ON rep.dup_group_id = r.dup_group_id
+             WHERE r.is_dup_content = 1 AND r.dup_group_id IS NOT NULL
+               AND r.comment_id <> rep.rep_id AND r.is_low_info = 0
+            """
+        )["n"]
+    )
+    check("复用层总量 = 独立 SQL 复算的成员数（BR-06 口径一致，与处理状态无关）",
+          reuse == reuse_indep, f"{reuse} vs 独立复算 {reuse_indep}")
 
     print("\n[B] 各层口径与待处理计数互相吻合")
     check("模型层待处理 = 调用层总量 − 已完成",

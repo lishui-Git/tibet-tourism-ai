@@ -810,7 +810,10 @@ def run_semantic_analysis(
         summary["estimated_cost_cny"] = {
             "min": round(estimate_cost_by_calls(stats.api_calls_planned, MEASURED_TOKENS_PER_CALL_MIN), 2),
             "max": round(estimate_cost_by_calls(stats.api_calls_planned, MEASURED_TOKENS_PER_CALL_MAX), 2),
-            "note": "按 32 次实测的单条 token 区间与配置单价推算；实际费用以运行结束打印的用量为准",
+            "note": "min/max 按**全量实测**的单条 token 最小/观测最大值与配置单价推算；"
+                    "注意 max 用的是分布**尾部观测值**（不是逐条理论上界，也不是预算口径）；"
+                    "预算请以 `--stage preflight` 打印的『预算建议（保守上界）』为准；"
+                    "实际费用以运行结束打印的用量为准",
         }
     if dry_run:
         return summary

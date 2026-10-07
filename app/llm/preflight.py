@@ -46,40 +46,37 @@ CORE_TABLE_BASELINE: dict[str, dict[str, Any]] = {
     "review": {"rows": 59033, "crc32": 1060622212},
 }
 
-# 实测成本参数 —— 两个**样本不同**，不要混为一谈（2026-10-06 重新校准）：
+# 实测成本参数 —— **全量运行完成后按真实结果重新校准**（2026-10-07）。
 #
-# ① 「32 次进程统计」：输入 10,691 / 输出 4,681 / 合计 15,372 ⇒ 均值 **480 token/条**。
-#    来源是当时运行日志的 `CallStats`，落到库里的只有最后 8 条。
-#    它仍是**覆盖面最大**的一次真实调用样本（32 条），因此均值继续沿用 480。
+# 【本轮的依据】全量 semantic 已实际跑完（`task_id=2807`，47,702 次付费调用），
+# 因此不再依赖"小样本外推"，而直接用**全量实测**：
+#     · 输入 16,199,065 + 输出 6,881,503 = **23,080,568** token / 47,702 次调用
+#     · 实测**均值 483.8 token/条**（原 480 来自 32 次进程统计）
+#     · 库内真实**最小 335**、真实**最大 2,695**（后者是分布尾部的一个观测值）
+#     · 实测总费用 **¥87.4502**，与旧模型中位预测 ¥87.63 相差 **0.18%**（口径经受住了检验）
 #
-# ② 「库内可复核样本」：`sentiment.raw_json.usage` 现存 **8** 条，
-#    逐条为 392 / 402 / 403 / 407 / 408 / 409 / 429 / **600**（合计 3,450，均值 431.3）。
-#    这是**任何人都能用只读 SQL 复核**的样本，因此区间上下界改以它为准：
-#      · 下界 **392**（现存最小值；原写 431，是 32 次进程统计的最小值）
-#      · 上界 **600**（现存最大值；原写 562 —— 已被库里那条 600 token 的评论**突破**）
-#
-# 【上界为什么必须改】旧上界 562 只是**那次 32 条样本内的最大值**，不是"全量最坏情况"：
-# 该样本取 `comment_id` 最小者，正文极短（8 条里 7 条只有 15–22 字，最长那条 126 字便已 600）。
-# 而全量待处理的 47,702 条里，正文 >126 字的有 **5,637** 条（>300 字 1,094 条，最长 1,829 字）。
-# 拿一个明显更短样本的最大值当"全量上限"，方向上是**低报风险**。
-# 因此：
-#   · `MEASURED_TOKENS_PER_CALL_MAX = 600` 的含义严格限定为「**已观察到的真实最大 token**」；
-#   · 更保守、随正文长度变化的**保守估算上界**由 `conservative_tokens_per_call()` 单独给出。
-# 由 `scripts/test_cost_model.py` 固定：**库内现存 usage 的最大值不得超过本常量**——
-# 一旦将来跑出更大值，该测试会失败并强制重新校准，而不是让成本模型悄悄漂移。
-#
-# 【保留的旧修正说明】`INPUT_SHARE`/`OUTPUT_SHARE` 原为 0.73/0.27，用实测汇总反算应为
-# 0.6955/0.3045（4,681 / 15,372 = 0.3045 恰好复算出实付 ¥0.0588，0.27 会算出 ¥0.0559）。
-# 输出单价是输入的 4 倍，比例偏小会使费用估算**偏低约 1.8%**，方向不利，故按实测改正。
-MEASURED_TOKENS_PER_CALL = 480
-MEASURED_TOKENS_PER_CALL_MIN = 392
-MEASURED_TOKENS_PER_CALL_MAX = 600
+# 【⚠️ 关键概念区分：观测最大值 ≠ 预算上界】
+#   · `OBSERVED_TOKENS_PER_CALL_MAX = 2695` 的含义**严格限定**为
+#     「**全量实测中出现过的单条最大 token**」——它是**分布尾部的一个观测值**，
+#     **不是**"逐条理论最坏情况"，**也不能**被当作预算口径拿去做 calls×max。
+#     （47,702 条里绝大多数在 300–700 之间；把尾部值当逐条上界会把预算夸大成 ¥370+，
+#      失去指导意义。）
+#   · **预算口径**另有其人：`conservative_tokens_per_call()` 按
+#     "固定 prompt + 正文长度 + 输出上限"推导，并按**真实正文长度分布加权**，
+#     给的是"大概率不会被突破的平均单条花费"，这才是判断"钱够不够"的依据。
+#   · 两者由 `scripts/test_cost_model.py` **分别断言**：观测最大值只需"覆盖库内实测最大"
+#     （防漂移），预算上界只需"高于实测均值"且"**不**等于 calls×观测最大值"。
+MEASURED_TOKENS_PER_CALL = 484          # 全量实测均值 483.8 → 取整 484
+MEASURED_TOKENS_PER_CALL_MIN = 335      # 全量实测最小（原 392 来自 8 条小样本）
+OBSERVED_TOKENS_PER_CALL_MAX = 2695     # 全量实测最大（**尾部观测值，非逐条上界**）
+# 兼容别名：历史代码/测试曾用 MEASURED_TOKENS_PER_CALL_MAX 这个名字。
+# 保留它只为不破坏引用，但**语义已改为"观测最大值"**，新代码请用上面那个更明确的名字。
+MEASURED_TOKENS_PER_CALL_MAX = OBSERVED_TOKENS_PER_CALL_MAX
 INPUT_SHARE = 0.6955
 OUTPUT_SHARE = 0.3045
 
-# 保守上界推导所锚定的"样本最长正文"长度：库内 8 条 usage 样本里最长的那条正文为 126 字
-# （token 600，即当前已观察到的最大值）。超过这个长度的评论，样本**完全没有覆盖**，
-# 因此单独用一条 SQL 精确统计它们的条数，用来提醒"样本之外的量有多大"。
+# 保守上界推导所锚定的"样本最长正文"长度：早期 8 条 usage 样本里最长的那条正文为 126 字。
+# 保留该常量是为了让 `pending_longer_than_sample` 这一提示项仍有明确含义。
 # （为什么要单独查：126 落在长度分桶的"101–150"桶内部，用桶平均值判断会把该桶整桶算错。）
 SAMPLE_MAX_BODY_CHARS = 126
 
@@ -121,11 +118,11 @@ def conservative_tokens_per_call_weighted(buckets: Sequence[Sequence[int]]) -> f
 
 # 景点评价（C-BAT-07）单次调用的 token 估算。
 #
-# 输入：实测 57 份事实包的最大 JSON 为 3,553 字符，对应真实 prompt 总字符数约 4,900，
-#       中文约 0.65 token/字 ⇒ 最坏约 **3,200 token**。这里取 **3,400**（略高于最坏实测）
-#       而不是原先的 2,700——因为预算是硬约束，**宁可高报**。
+# 输入：全量 semantic 完成后，事实包证据更完整、prompt 也更大。
+#       `test_cost_model` 用**真实事实包 + 真实 prompt** 量出的最坏输入已升至 **≈3,585 token**
+#       （此前 3,400 是按 3,186 的最坏值定的）。预算是硬约束，**宁可高报**，故调到 **3,600**。
 # 输出：按 Schema 上限估算（而非中位数），同样取保守值。
-REPORT_INPUT_TOKENS = 3_400
+REPORT_INPUT_TOKENS = 3_600
 REPORT_OUTPUT_TOKENS = 700
 
 
@@ -432,7 +429,13 @@ LAYERING_SQL: dict[str, str] = {
                        "WHERE cs.source = 'rule'",
     # 复用层：非低信息量的重复组非代表成员（复制代表结果，零调用）
     "layer_reuse_total": f"SELECT COUNT(*) FROM ({_LAYER_REUSE_CTE}) t",
-    "layer_reuse_done": "SELECT COUNT(*) FROM comment_semantic WHERE source = 'reuse'",
+    # 【计数口径修正】复用层的"已完成"必须看**复用行的真实标记**：
+    # 复用结果写库时 `sentiment.raw_json.source='reuse'`（见 `_build_reuse_raw`），
+    # 而 `comment_semantic.source` 会被复制成代表的值（'deepseek'），**不带 'reuse'**。
+    # 原实现数 `comment_semantic.source='reuse'`，全量跑完后恒为 0，
+    # 于是出现"复用层待处理 0 条，但已完成 0 ≠ 总量 1,071"的假阻断。
+    "layer_reuse_done": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
+                        "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.source'))='reuse'",
     # 调用层：既非低信息量、又非复用成员的其余评论（真正进入模型）
     "layer_call_total": f"""
         SELECT COUNT(*) FROM review r
@@ -440,14 +443,17 @@ LAYERING_SQL: dict[str, str] = {
            AND NOT (r.is_low_info = 1 OR CHAR_LENGTH(TRIM(r.content)) <= 10)
            AND r.comment_id NOT IN ({_LAYER_REUSE_CTE})
     """,
-    # 调用层已完成：只数**调用层口径内**的已完成（其余不含低信息量、也不含重复组成员）。
-    # 若直接数 `sentiment` 全表，会把规则层/复用层复制过来的行也算成"模型已完成"，
-    # 导致 `pending ≠ 总量 − 已完成`（这一处口径错误由本节的一致性检查当场抓出）。
-    "layer_call_done": "SELECT COUNT(*) FROM review r JOIN sentiment se ON se.comment_id = r.comment_id "
-                       "AND se.method='deepseek' "
-                       "WHERE r.content IS NOT NULL AND TRIM(r.content) <> '' "
-                       "AND NOT (r.is_low_info = 1 OR CHAR_LENGTH(TRIM(r.content)) <= 10) "
-                       "AND r.is_dup_content = 0",
+    # 调用层已完成：**与 `layer_call_total` 完全相同的筛选条件**，只把"有 deepseek 结果"作为完成判据。
+    # 【计数口径修正】原实现额外加了 `r.is_dup_content = 0`，这会把**重复组代表**（它们确实在调用层、
+    # 也确实被调用了）整批排除，导致"pending ≠ 总量 − 已完成"（实测差 585 条）。
+    # 正确做法是复用同一个 `_LAYER_REUSE_CTE` 排除"非代表成员"，而不是用 is_dup_content 粗筛。
+    "layer_call_done": f"""
+        SELECT COUNT(*) FROM review r
+          JOIN sentiment se ON se.comment_id = r.comment_id AND se.method = 'deepseek'
+         WHERE r.content IS NOT NULL AND TRIM(r.content) <> ''
+           AND NOT (r.is_low_info = 1 OR CHAR_LENGTH(TRIM(r.content)) <= 10)
+           AND r.comment_id NOT IN ({_LAYER_REUSE_CTE})
+    """,
     # 异常组合（正常应全为 0）
     "rule_row_on_normal": "SELECT COUNT(*) FROM review r JOIN comment_semantic cs ON cs.comment_id = r.comment_id "
                           "WHERE cs.source='rule' AND r.is_low_info = 0 "
@@ -608,6 +614,10 @@ def collect() -> Preflight:
             "max_body_chars": max_body_chars,
             "conservative_tokens_per_call_weighted": round(weighted_conservative, 1),
             "conservative_tokens_per_call_max_body": conservative_tokens_per_call(max_body_chars),
+            # 【概念区分，别混用】观测最大值 = 全量实测中单条最大 token（分布尾部）；
+            # 预算上界 = 上面的 `conservative_tokens_per_call_weighted`（按长度分布加权）。
+            # 观测最大值**只用于**"防漂移"核对，**不得**拿去做 calls×max 的预算。
+            "observed_tokens_per_call_max": OBSERVED_TOKENS_PER_CALL_MAX,
             "basis": (
                 "保守上界 = 300（固定 prompt，实测最短正文的 prompt_tokens 304–312）"
                 f" + 0.7×正文长度（中文 token/字，保守取值） + 300（输出上限，实测 88–232、max_tokens=512）"
@@ -805,20 +815,24 @@ def print_report(preflight: Preflight | None = None) -> dict[str, Any]:
     print(f"  事实包 spot_fact_package : {counts['fact_package_done']} 行（C-BAT-06，零 API）")
     print(f"  评价 spot_report         : {counts['report_done']} 行 / 待生成 {counts['report_pending']} 行")
 
-    print("\n[4] 预计工作量与费用（库内实测口径：均值 {0}、已观察区间 {1}–{2} token/条）".format(
-        cost["tokens_per_call_measured"], MEASURED_TOKENS_PER_CALL_MIN, MEASURED_TOKENS_PER_CALL_MAX
+    print("\n[4] 预计工作量与费用（库内全量实测：均值 {0}、最小 {1}、观测最大 {2} token/条）".format(
+        cost["tokens_per_call_measured"], MEASURED_TOKENS_PER_CALL_MIN, OBSERVED_TOKENS_PER_CALL_MAX
     ))
     print(f"  评论级 API 次数        : {workload['comment_api_calls']}")
     print(f"  景点级 API 次数        : {workload['spot_report_api_calls']}（57 个景点评价）")
     print(f"  事实包 API 次数        : {workload['fact_package_api_calls']}（纯 SQL 聚合）")
     print(f"  API 次数合计           : {workload['total_api_calls']}")
-    print(f"  预计费用               : 评论级 ¥{cost['comment_cost_min_cny']}–{cost['comment_cost_max_cny']}"
+    print(f"  参考区间               : 评论级 ¥{cost['comment_cost_min_cny']}–{cost['comment_cost_max_cny']}"
           f" + 景点级 ¥{cost['spot_report_cost_cny']}"
-          f" = 合计 ¥{cost['total_cost_min_cny']}–{cost['total_cost_max_cny']}"
-          f"（按 1 次成功、无重试估算）")
-    print(f"  ★ 保守估算上界         : 合计 ¥{cost['total_cost_conservative_cny']}"
+          f" = 合计 ¥{cost['total_cost_min_cny']}–{cost['total_cost_max_cny']}")
+    print(f"      · 下限按实测**最小** {MEASURED_TOKENS_PER_CALL_MIN} token/条；"
+          f"上限按**全量观测最大值** {OBSERVED_TOKENS_PER_CALL_MAX} token/条")
+    print("      · ⚠️ 观测最大值是**分布尾部的一个观测点**，既不是逐条理论上界，"
+          "**也不是**预算口径（拿它×全部调用数会把预算夸大到失去意义）")
+    print(f"  ★ 预算建议（保守上界）: 合计 ¥{cost['total_cost_conservative_cny']}"
           f"（评论级 ¥{cost['comment_cost_conservative_cny']} + 景点级 ¥{cost['spot_report_cost_cny']}）"
-          f"——按正文长度分布加权，比区间上限更值得用来判断预算")
+          f"——按正文长度分布加权（{ (cost.get('calibration') or {}).get('conservative_tokens_per_call_weighted', '—') } token/条），"
+          f"这是判断『钱够不够』的依据；区间上限**不是**")
     cal = cost.get("calibration") or {}
     if cal:
         print(f"  校准证据               : 库内可复核 usage {cal['usage_rows']} 条"
@@ -888,6 +902,7 @@ __all__ = [
     "MEASURED_TOKENS_PER_CALL",
     "MEASURED_TOKENS_PER_CALL_MIN",
     "MEASURED_TOKENS_PER_CALL_MAX",
+    "OBSERVED_TOKENS_PER_CALL_MAX",
     "FIXED_PROMPT_TOKENS",
     "CHINESE_TOKENS_PER_CHAR",
     "CONSERVATIVE_OUTPUT_TOKENS",

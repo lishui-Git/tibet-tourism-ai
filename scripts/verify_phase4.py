@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
 from datetime import datetime
@@ -78,7 +79,7 @@ def table_state() -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def pick_samples() -> dict[str, list[int]]:
+def _pick_real_samples() -> dict[str, list[int]]:
     """挑出用于验证的评论：普通评论 / 低信息量评论 / 重复组成员（各自互不重叠）。"""
     normal = [
         int(r["comment_id"])
@@ -132,6 +133,118 @@ def pick_samples() -> dict[str, list[int]]:
             )
         ]
     return {"normal": normal, "low_info": low_info, "dup": dup}
+
+
+# ---------------------------------------------------------------------------
+# 【全量跑完后的可测性】临时合成样本
+# ---------------------------------------------------------------------------
+# 背景：本脚本需要"**尚未处理**的评论"来演练四个场景（规则层 / 复用层 / 断点续跑 /
+# 失败注入后批次继续）。全量 semantic 一旦跑完，库里就几乎没有未处理评论了
+# （实测只剩 2 条失败项），于是这些场景会因为"样本不足"而**无法验证**。
+#
+# 处置：临时**插入**一批合成评论（`comment_id` 从 990,000,001 起，远高于真实最大值
+# 828,505,175；`dup_group_id` 用 999,001 起，远高于真实最大值 1,285），
+# 让这些场景仍然可测；运行结束时**连同其结果一并删除**，并且启动时自愈上次的残留。
+# 这样既不重跑真实 API、也不改动任何真实行。
+TEMP_COMMENT_ID_BASE = 990_000_001
+TEMP_DUP_GROUP_BASE = 999_001
+TEMP_REVIEW_IDS: set[int] = set()   # 本次插入的临时评论（必须全部删除）
+# 递增分配 ID：即使 `install_temp_samples` 被调用多次，也不会撞主键。
+_TEMP_ID_SEQ = itertools.count(TEMP_COMMENT_ID_BASE)
+
+
+def purge_temp_samples() -> int:
+    """清掉上次异常退出残留的临时合成评论（`comment_id >= TEMP_COMMENT_ID_BASE`）。
+
+    与 `purge_test_traces` 一样，属于"自愈"：万一上次在插入之后、清理之前被强杀，
+    残留的临时评论会一直留在 `review` 里；这里在取快照前先清干净。
+    """
+    with connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT comment_id FROM review WHERE comment_id >= %s", (TEMP_COMMENT_ID_BASE,)
+            )
+            ids = [int(r["comment_id"]) for r in cur.fetchall()]
+            if not ids:
+                return 0
+            ph = ",".join(["%s"] * len(ids))
+            t = tuple(ids)
+            cur.execute(f"DELETE FROM aspect WHERE comment_id IN ({ph})", t)
+            cur.execute(f"DELETE FROM comment_semantic WHERE comment_id IN ({ph})", t)
+            cur.execute(f"DELETE FROM sentiment WHERE comment_id IN ({ph})", t)
+            cur.execute(f"DELETE FROM review WHERE comment_id IN ({ph})", t)
+    TEMP_REVIEW_IDS.clear()
+    return len(ids)
+
+
+def install_temp_samples(need_normal: int = 24, need_low: int = 3, need_dup: int = 3) -> dict[str, list[int]]:
+    """临时插入一批"未处理评论"，用于在全量跑完后继续验证四个场景。
+
+    数量为什么是 24 条普通样本：三个场景会**依次**消耗"未处理评论"——
+    `verify_semantic` 用 8 条、断点续跑用 3 条、失败注入用 6 条（合计 17 条），
+    再留若干余量，避免"前一个场景把样本吃光、后一个场景又报样本不足"。
+
+    数据全部以 `【临时测试】` 开头以便人工辨认；插入的 ID 记入 `TEMP_REVIEW_IDS`，
+    由 `cleanup()` 负责删除（并在启动时由 `purge_temp_samples()` 兜底）。
+    """
+    spot_id = int(
+        (query_all("SELECT spot_id FROM spot WHERE has_full_evaluation=1 ORDER BY spot_id LIMIT 1")
+         or [{"spot_id": 1}])[0]["spot_id"]
+    )
+    rows: list[tuple] = []
+    normal: list[int] = []
+    low_info: list[int] = []
+    dup: list[int] = []
+
+    for i in range(need_normal):
+        cid = next(_TEMP_ID_SEQ)
+        body = f"【临时测试】普通评论样本 {i}：这里的风景很好，值得一去。"
+        rows.append((cid, spot_id, body, len(body), 0, 0, None))
+        normal.append(cid)
+    for i in range(need_low):
+        cid = next(_TEMP_ID_SEQ)
+        body = f"不错{i}"          # ≤10 字 → 走规则层（BR-05）
+        rows.append((cid, spot_id, body, len(body), 1, 0, None))
+        low_info.append(cid)
+    for i in range(need_dup):
+        cid = next(_TEMP_ID_SEQ)
+        body = "【临时测试】重复正文样本：景色不错。"   # 同组正文完全相同
+        rows.append((cid, spot_id, body, len(body), 0, 1, TEMP_DUP_GROUP_BASE))
+        dup.append(cid)
+
+    with connection() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO review "
+                "(comment_id, spot_id, content, content_length, is_low_info, is_dup_content, "
+                " dup_group_id, publish_date, user_nick) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,'2024-01-01','临时测试')",
+                rows,
+            )
+    TEMP_REVIEW_IDS.update(r[0] for r in rows)
+    print(
+        f"      · 已临时插入合成样本 {len(rows)} 条"
+        f"（普通 {need_normal} / 低信息量 {need_low} / 重复组 {need_dup}，"
+        f"comment_id ≥ {TEMP_COMMENT_ID_BASE}）——运行结束会全部删除"
+    )
+    return {"normal": normal, "low_info": low_info, "dup": dup}
+
+
+def pick_samples() -> dict[str, list[int]]:
+    """取验证样本：优先用库里**真实**的未处理评论；不够时临时合成一批。
+
+    为什么要"不够时合成"：全量 semantic 跑完后库里几乎没有未处理评论，
+    而本脚本的四个场景（规则层 / 复用层 / 断点续跑 / 失败注入）都要求"有未处理评论"。
+    若直接跳过这些场景，就等于"因为跑完了所以不再验证"，那是不可接受的。
+    """
+    real = _pick_real_samples()
+    if len(real["normal"]) >= 8 and len(real["dup"]) >= 2:
+        return real
+    print(
+        f"      · 库内未处理评论不足（普通 {len(real['normal'])} 条、重复组 {len(real['dup'])} 条）"
+        "——全量已跑完，改为临时合成样本"
+    )
+    return install_temp_samples()
 
 
 # ---------------------------------------------------------------------------
@@ -293,13 +406,17 @@ def verify_semantic(samples: dict[str, list[int]]) -> None:
             f"成功 {outcome['api_success']} / 失败 {outcome['api_failed']} / 合计 {attempted}（计划 6）",
         )
         placeholders6 = ",".join(["%s"] * 6)
+        # 【为什么必须限定 task_id】样本里可能包含"历史上就失败过的评论"（例如全量跑完后
+        # 遗留的 2 条真实失败项，它们在 task_log 里已有 resolved=0 的 ERROR 行）。
+        # 若只按 ref_key 统计，会把**历史**错误也计进来（实测 6 条 vs 本次失败 2 条）。
+        # 这条断言的本意是"**本次**失败被登记下来了"，因此按本次任务的 task_id 收窄。
         error_logs = scalar(
             f"SELECT COUNT(*) FROM task_log WHERE level='ERROR' AND stage='semantic' AND resolved=0 "
-            f"AND ref_key IN ({placeholders6})",
-            tuple(str(i) for i in fail_ids),
+            f"AND task_id=%s AND ref_key IN ({placeholders6})",
+            (int(outcome["task_id"]), *tuple(str(i) for i in fail_ids)),
         )
         check("失败已写入 task_log（可据此补跑）", error_logs == outcome["api_failed"],
-              f"ERROR 日志 {error_logs} 条 / 失败 {outcome['api_failed']} 条")
+              f"本次 ERROR 日志 {error_logs} 条 / 失败 {outcome['api_failed']} 条")
 
         failed_ids = [
             int(r["comment_id"])
@@ -437,20 +554,31 @@ def verify_spot_report(packages: list[dict]) -> None:
 
 
 def purge_test_traces() -> int:
-    """删除结果表里"带测试标记"的行（`raw_json.mode` 为 `mock` 或 `reuse`），返回删除条数。
+    """删除结果表里**确定属于测试痕迹**的行（`raw_json.mode='mock'`），返回删除条数。
 
-    只认**标记**，因此绝不会误删真实结果：31 条真实写入时还没有 `mode` 字段，
-    读作"无标记"；而 mock 行由 `MockClient` 路径写入 `mode='mock'`、
-    复用行写入 `mode='reuse'`（本轮补上该标记，此前复用行没有标记、无法区分）。
+    ## 【本轮修正的一处严重缺陷】为什么不再删 `mode='reuse'`
+    原实现把 `mode IN ('mock','reuse')` 一律当测试痕迹删除，注释写着"绝不会误删真实结果"。
+    这个假设在**全量生产运行之后不再成立**：
 
-    范围限于本脚本会写的三张表：`sentiment`(deepseek) / `comment_semantic` / `aspect`。
+      · `mode='mock'` —— 只有 `--mock` 路径会写，**唯一**属于测试痕迹，可以安全清理；
+      · `mode='reuse'` —— **生产也会合法写**！C-BAT-05 的复用层（BR-06：重复正文组内
+        只调一次、其余成员复制代表结果）在全量运行时就会产出这种行。
+
+    实测事故：全量 semantic 跑完后库内有 **1,071** 条合法的 `mode='reuse'` 行，
+    本函数在启动自愈时把它们**连同 aspect / comment_semantic 一起删光**，
+    等于"测试脚本破坏了生产数据"（总量 59,029 → 57,959）。
+    因此这里改为**只清理 `mock`**，`reuse` 一律不动。
+
+    需要清理历史遗留的复用行时，请**显式**处理，不要依赖本函数的自动自愈。
+
+    范围仍限于本脚本会写的三张表：`sentiment`(deepseek) / `comment_semantic` / `aspect`。
     """
     marked: list[int] = []
     with connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT comment_id FROM sentiment WHERE method='deepseek' "
-                "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode')) IN ('mock','reuse')"
+                "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode'))='mock'"
             )
             marked = [int(r["comment_id"]) for r in cur.fetchall()]
             if not marked:
@@ -463,6 +591,22 @@ def purge_test_traces() -> int:
                 tuple(marked),
             )
     return len(marked)
+
+
+def count_reuse_rows() -> int:
+    """统计库内 `mode='reuse'` 的**合法复用行**条数（只读，仅用于提示，绝不删除）。
+
+    单独抽出来是为了让"复用行有多少"这个信息仍然可见——它是有意义的可见指标
+    （代表 BR-06 复制了多少条），但**不是**测试痕迹。
+    """
+    with connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM sentiment WHERE method='deepseek' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.mode'))='reuse'"
+            )
+            row = cur.fetchone() or {}
+    return int(row.get("n") or 0)
 
 
 def snapshot_results() -> dict[str, set[int]]:
@@ -491,6 +635,17 @@ def cleanup() -> None:
     snapshot = SNAPSHOT
     with connection() as conn:
         with conn.cursor() as cur:
+            # 【先删临时合成评论】它们不在快照里，必须显式删除（含 review 行本身）。
+            # 放在最前面：即使后面的快照差集逻辑出问题，临时测试数据也不会留在生产表里。
+            if TEMP_REVIEW_IDS:
+                tids = tuple(sorted(TEMP_REVIEW_IDS))
+                ph = ",".join(["%s"] * len(tids))
+                cur.execute(f"DELETE FROM aspect WHERE comment_id IN ({ph})", tids)
+                cur.execute(f"DELETE FROM comment_semantic WHERE comment_id IN ({ph})", tids)
+                cur.execute(f"DELETE FROM sentiment WHERE method='deepseek' AND comment_id IN ({ph})", tids)
+                cur.execute(f"DELETE FROM review WHERE comment_id IN ({ph})", tids)
+                TEMP_REVIEW_IDS.clear()
+
             task_ids = [
                 int(r["task_id"])
                 for r in query_all(
@@ -601,16 +756,29 @@ def main(argv: list[str] | None = None) -> int:
     if not precheck_clean():
         return 2
 
-    # 【自愈】先把上一次"非正常退出"留下的测试痕迹清掉，再取快照。
+    # 【自愈】先把上一次"非正常退出"留下的**测试痕迹**清掉，再取快照。
     # 为什么必须有这一步（实测踩到的坑）：
     #   若本脚本在**写入之后、清理之前**被强杀（例如外部中断），`finally` 不会执行，
-    #   于是 mock/复用行会残留在结果表里。更糟的是：**下一次运行时，
+    #   于是 mock 行会残留在结果表里。更糟的是：**下一次运行时，
     #   这些残留会被并进快照**，从而被当成"验证前就存在的真实数据"而**永不被清理**——
     #   污染会变得"粘住"，只能靠人工发现（这次就是被 preflight 的 mock 检查抓出来的）。
     #   在取快照前清掉它们，使脚本对"被中断"具备自愈能力。
+    #
+    # 【⚠️ 只清 mock，不清 reuse】原实现连 `mode='reuse'` 一起删，但复用行**生产也会合法写**
+    # （BR-06：重复正文组内只调一次代表，其余成员复制结果）。实测已造成事故：
+    # 全量 semantic 跑完后的 1,071 条合法复用行被本函数删光。详见 `purge_test_traces` 的说明。
     purged = purge_test_traces()
     if purged:
-        print(f"[自愈] 清理上次残留的测试痕迹：{purged} 条（mock/复用行）")
+        print(f"[自愈] 清理上次残留的 mock 测试痕迹：{purged} 条")
+    purged_temp = purge_temp_samples()
+    if purged_temp:
+        print(f"[自愈] 清理上次残留的**临时合成评论**：{purged_temp} 条（comment_id ≥ {TEMP_COMMENT_ID_BASE}）")
+    reuse_rows = count_reuse_rows()
+    if reuse_rows:
+        print(
+            f"[信息] 库内现有 {reuse_rows} 条 `mode='reuse'` 行——这是 **BR-06 的合法生产结果**"
+            "（重复正文组内复用代表结果），**不会**被本脚本清理。"
+        )
 
     global SNAPSHOT
     SNAPSHOT = snapshot_results()
