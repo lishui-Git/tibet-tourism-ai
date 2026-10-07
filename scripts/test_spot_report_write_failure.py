@@ -38,6 +38,7 @@ from app.batch.write_recovery import RECOVERY_DIR, load_recovery
 from app.db import connection, query_all, query_one
 from app.llm.mock import MockClient
 from app.llm.client import LlmError  # noqa: F401  （保留导入以便将来注入调用失败）
+from scripts.result_isolation import isolated_spot_results, snapshot
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -88,11 +89,16 @@ def counts() -> dict[str, int]:
     return {k: int(v) for k, v in row.items()}
 
 
-def cleanup(run_tag: str, spot_ids: Sequence[int] | None = None) -> int:
-    """清理**本次运行**产生的行：按 `created_at >= run_tag` 圈定本次的任务与日志。
+def cleanup(run_tag: str) -> int:
+    """清理**本次运行**产生的**任务与日志**：按 `created_at >= run_tag` 圈定。
 
     为什么要按运行标记而不是"手工收集 task_id"：`run_fact_package` 与 `run_spot_report`
     都会在内部**自行登记任务**，只删自己拿到的 id 一定会漏（同类缺陷上一轮已经踩过一次）。
+
+    【重要】本函数**不再删除 `spot_report` / `spot_fact_package`**。
+    旧实现按 `spot_id` 无条件删这两张表，Stage 5 生成生产评价后会删掉**真实结果**。
+    景点级结果的"临时清空 + 精确还原"统一交给 `result_isolation.isolated_spot_results`。
+
     :returns: 删除的任务行数
     """
     with connection() as conn:
@@ -107,14 +113,62 @@ def cleanup(run_tag: str, spot_ids: Sequence[int] | None = None) -> int:
                 ph = ",".join(["%s"] * len(task_ids))
                 cur.execute(f"DELETE FROM task_log WHERE task_id IN ({ph})", tuple(task_ids))
                 cur.execute(f"DELETE FROM analysis_task WHERE task_id IN ({ph})", tuple(task_ids))
-            if spot_ids:
-                ph = ",".join(["%s"] * len(spot_ids))
-                cur.execute(f"DELETE FROM spot_report WHERE spot_id IN ({ph})", tuple(spot_ids))
-                cur.execute(f"DELETE FROM spot_fact_package WHERE spot_id IN ({ph})", tuple(spot_ids))
     return len(task_ids)
 
 
+def count_stale_test_tasks() -> int:
+    """**只读**统计历史上遗留的 fact_package / spot_report 任务条数（供知情，不做删除）。
+
+    【为什么改成只读】旧实现会 `DELETE ... WHERE created_at >= '1970-01-01'`，
+    即把**历史上所有** fact_package / spot_report 任务行删掉 —— 那是审计轨迹，
+    Stage 5 真实生成时产生的任务行也会被一并删除。这里改为只报告、不删除。
+    """
+    row = query_one(
+        "SELECT COUNT(*) AS n FROM analysis_task "
+        "WHERE task_type IN ('fact_package','spot_report')"
+    )
+    return int(row["n"])
+
+
+def _target_spot_ids() -> list[int]:
+    """本测试使用的 2 个景点（与 `_run_body` 内的选点口径**完全一致**）。"""
+    rows = query_all(
+        "SELECT spot_id FROM spot WHERE has_full_evaluation=1 ORDER BY spot_id LIMIT 2"
+    )
+    return [int(r["spot_id"]) for r in rows]
+
+
 def main() -> int:
+    """【测试隔离】包住整个测试：快照这 2 个景点的景点级结果 → 临时清空 → 跑主体 → **精确还原**。
+
+    为什么必须隔离：本测试会为这 2 个景点构造事实包、并用 `MockClient` 写入**mock 评价**。
+    若它们已有生产结果（Stage 5 之后），不隔离就会**覆盖/删除生产数据**。
+    """
+    targets = _target_spot_ids()
+    with isolated_spot_results(targets) as snap:
+        before_all = {k: len(v) for k, v in snap.items()}
+        rc = _run_body()
+
+    after = snapshot(targets)
+    after_all = {k: len(v) for k, v in after.items()}
+    print("\n[隔离收尾] 这 2 个景点的景点级结果应精确回到测试前状态：")
+    print(f"  fact_package: {before_all['fact_package']} → {after_all['fact_package']}")
+    print(f"  spot_report : {before_all['spot_report']} → {after_all['spot_report']}")
+    check("隔离层已精确还原（生产 spot_report / fact_package 未被删除或覆盖）",
+          after_all == before_all, "")
+
+    passed = sum(1 for _, ok, _ in RESULTS if ok)
+    total = len(RESULTS)
+    print("\n" + "=" * 86)
+    print(f"景点评价写库兜底：{passed}/{total} 项通过")
+    for name, ok, detail in RESULTS:
+        if not ok:
+            print(f"  FAIL: {name} — {detail}")
+    print("=" * 86)
+    return 0 if (rc == 0 and passed == total) else 1
+
+
+def _run_body() -> int:
     from datetime import datetime
 
     print("=" * 86)
@@ -127,9 +181,10 @@ def main() -> int:
     spot_ids = [int(r["spot_id"]) for r in spots]
     print(f"\n测试景点：{[(r['spot_id'], r['spot_name']) for r in spots]}")
 
-    # 先清掉本测试可能遗留的数据（上一次异常退出会留下事实包/任务行），保证基线干净
-    stale = cleanup("1970-01-01 00:00:00", None)
-    print(f"预清理历史遗留：扫描到 {stale} 条 fact_package/spot_report 任务（均为本测试类型）")
+    # 历史遗留只**报告**不删除（旧实现会把历史上所有 fact_package/spot_report 任务行删掉，
+    # 那是审计轨迹，Stage 5 的生产任务也会被误删）。景点级残留由隔离层负责清空。
+    stale = count_stale_test_tasks()
+    print(f"历史 fact_package/spot_report 任务行（只读统计，不删除）：{stale} 条")
 
     run_tag = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     before = counts()
@@ -211,8 +266,8 @@ def main() -> int:
               and "summary" in payload and "token_usage" in payload,
               json.dumps({k: payload[k] for k in ("spot_id", "fact_package_version", "token_usage")}, ensure_ascii=False))
 
-    # ---------- 清理：按运行标记删除本次产生的任务/日志/事实包 ----------
-    removed = cleanup(run_tag, spot_ids)
+    # ---------- 清理：按运行标记删除本次产生的任务/日志（景点级结果由隔离层还原） ----------
+    removed = cleanup(run_tag)
     if RECOVERY_DIR.exists():
         for path in RECOVERY_DIR.glob("spot_report_*.jsonl"):
             path.unlink()
@@ -221,18 +276,12 @@ def main() -> int:
 
     check("清理覆盖了本次运行的全部任务（含内部自行登记的）", removed >= 2, f"删除任务 {removed} 条")
     after = counts()
-    check("清理后核心表回到基线（未污染真实数据）", after == before,
+    # 【断言口径修正】本测试故意为这 2 个景点写入事实包 + mock 评价，
+    # 现在这些行**由隔离层在出块时还原**，所以块内不可能回到"隔离前"的总数。
+    # 这里只断言"任务与日志已清理干净"，景点级结果由外层 `main()` 的隔离收尾断言。
+    check("清理后任务行回到隔离后基线（无任务泄漏）", after["tasks"] == before["tasks"],
           f"{json.dumps(before, ensure_ascii=False)} → {json.dumps(after, ensure_ascii=False)}")
-
-    passed = sum(1 for _, ok, _ in RESULTS if ok)
-    total = len(RESULTS)
-    print("\n" + "=" * 86)
-    print(f"景点评价写库兜底：{passed}/{total} 项通过")
-    for name, ok, detail in RESULTS:
-        if not ok:
-            print(f"  FAIL: {name} — {detail}")
-    print("=" * 86)
-    return 0 if passed == total else 1
+    return 0
 
 
 if __name__ == "__main__":

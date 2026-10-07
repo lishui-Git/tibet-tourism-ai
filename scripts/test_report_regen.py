@@ -31,6 +31,7 @@ from app.db import connection, query_one
 from app.llm.mock import MockClient
 from app.web import create_app
 from app.web.auth import create_user
+from scripts.result_isolation import isolated_spot_results, snapshot
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -48,40 +49,75 @@ def max_task_id() -> int:
 
 def cleanup(
     spot_id: int, task_id_floor: int, user_ids: list[int]
-) -> tuple[int, int, int, int, int]:
-    """精确清理本次测试写入的数据。
+) -> tuple[int, int, int]:
+    """清理本次测试写入的**任务与用户**。
 
     清理依据是 **task_id_floor**（测试开始前的最大 task_id）而不是"手工收集的 id"：
     因为 `run_fact_package()` / `run_spot_report()` 会在内部**自己登记任务**，
     只删接口层收集到的任务 id 会漏掉它们（曾因此先后泄漏了 6 条 fact_package 任务行）。
     凡是 `task_id > task_id_floor` 的任务，一定是本次测试产生的 → 一并删除。
 
-    返回 `(该景点剩余 report, 该景点剩余 fact_package, sys_user 剩余, 删除用户数, 删除任务数)`。
+    【重要】本函数**不再删除 `spot_report` / `spot_fact_package`**。
+    旧实现按 `spot_id` 无条件删这两张表，Stage 5 生成生产评价后会把**真实结果删掉**。
+    景点级结果的"临时清空 + 精确还原"统一交给 `result_isolation.isolated_spot_results`。
+
+    返回 `(sys_user 剩余, 删除用户数, analysis_task 剩余)`。
     """
     with connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM spot_report WHERE spot_id=%s", (spot_id,))
-            cur.execute("DELETE FROM spot_fact_package WHERE spot_id=%s", (spot_id,))
             cur.execute("DELETE FROM task_log WHERE task_id > %s", (task_id_floor,))
             cur.execute("DELETE FROM analysis_task WHERE task_id > %s", (task_id_floor,))
-            deleted_tasks = cur.rowcount
             deleted_users = 0
             if user_ids:
                 ph = ",".join(["%s"] * len(user_ids))
                 cur.execute(f"DELETE FROM sys_user WHERE user_id IN ({ph})", tuple(user_ids))
                 deleted_users = cur.rowcount
-            cur.execute("SELECT COUNT(*) AS n FROM spot_report WHERE spot_id=%s", (spot_id,))
-            left_report = int(cur.fetchone()["n"])
-            cur.execute("SELECT COUNT(*) AS n FROM spot_fact_package WHERE spot_id=%s", (spot_id,))
-            left_pkg = int(cur.fetchone()["n"])
             cur.execute("SELECT COUNT(*) AS n FROM sys_user")
             left_users = int(cur.fetchone()["n"])
             cur.execute("SELECT COUNT(*) AS n FROM analysis_task")
             left_tasks = int(cur.fetchone()["n"])
-    return left_report, left_pkg, left_users, deleted_users, left_tasks
+    return left_users, deleted_users, left_tasks
+
+
+def _target_spot_id() -> int:
+    """本测试使用的合格景点（与 `_run_body` 内的选点口径**完全一致**）。"""
+    row = query_one(
+        "SELECT spot_id FROM spot WHERE has_full_evaluation=1 ORDER BY spot_id LIMIT 1"
+    )
+    return int(row["spot_id"])
 
 
 def main() -> int:
+    """【测试隔离】包住整个测试：快照该景点的景点级结果 → 临时清空 → 跑主体 → **精确还原**。
+
+    为什么必须隔离：本测试会对该景点 `--force` 重新生成评价，并在中间用 `MockClient` 写入
+    **mock 评价**。若该景点已有生产评价（Stage 5 之后），不隔离就会**覆盖/删除生产结果**。
+    隔离层保证：测试跑在干净状态上，结束后把生产行原样写回。
+    """
+    target = _target_spot_id()
+    with isolated_spot_results([target]) as snap:
+        rc = _run_body()
+
+    after = snapshot([target])
+    print("\n[隔离收尾] 该景点的景点级结果应精确回到测试前状态：")
+    print(f"  fact_package: {len(snap['fact_package'])} → {len(after['fact_package'])}")
+    print(f"  spot_report : {len(snap['spot_report'])} → {len(after['spot_report'])}")
+    check("隔离层已精确还原（生产 spot_report / fact_package 未被删除或覆盖）",
+          len(after["fact_package"]) == len(snap["fact_package"])
+          and len(after["spot_report"]) == len(snap["spot_report"]), "")
+
+    passed = sum(1 for _, ok, _ in RESULTS if ok)
+    total = len(RESULTS)
+    print("\n" + "=" * 84)
+    print(f"接口 19 测试：{passed}/{total} 项通过")
+    for name, ok, detail in RESULTS:
+        if not ok:
+            print(f"  FAIL: {name} — {detail}")
+    print("=" * 84)
+    return 0 if (rc == 0 and passed == total) else 1
+
+
+def _run_body() -> int:
     app = create_app()
     admin_id: int | None = None
 
@@ -181,30 +217,19 @@ def main() -> int:
           resp.status_code == 200 and body["data"]["available"] is True,
           f"available={body['data'].get('available')}")
 
-    # ---------- 清理 ----------
-    left_report, left_pkg, left_users, deleted_users, left_tasks = cleanup(
+    # ---------- 清理（只清用户与任务；景点级结果由隔离层精确还原） ----------
+    left_users, deleted_users, left_tasks = cleanup(
         spot_id, task_floor, [u for u in (admin_id, normal.user_id) if u]
     )
-    print(f"\n已清理：删除用户 {deleted_users} 个；spot_report 剩余 {left_report} 行（该景点）、"
-          f"fact_package 剩余 {left_pkg} 行、sys_user 剩余 {left_users} 行、analysis_task 剩余 {left_tasks} 行")
+    print(f"\n已清理：删除用户 {deleted_users} 个；sys_user 剩余 {left_users} 行、"
+          f"analysis_task 剩余 {left_tasks} 行（spot_report / fact_package 由隔离层还原）")
     check("清理时确实删除了本次创建的用户", deleted_users == 2, f"影响行数 {deleted_users}")
-    check("清理后该景点无 spot_report 残留", left_report == 0, f"剩余 {left_report}")
-    check("清理后该景点无 fact_package 残留", left_pkg == 0, f"剩余 {left_pkg}")
     check("清理后无测试用户残留", left_users == 0, f"剩余 {left_users}")
     # 这条断言是本轮补的：run_fact_package / run_spot_report 会在内部自行登记任务，
     # 早先只删"接口层收集到的 id"导致先后泄漏了 6 条 fact_package 任务行。
     check("清理后 analysis_task 行数回到测试前基线（无任务泄漏）",
           left_tasks == tasks_before, f"前 {tasks_before} → 后 {left_tasks}")
-
-    passed = sum(1 for _, ok, _ in RESULTS if ok)
-    total = len(RESULTS)
-    print("\n" + "=" * 84)
-    print(f"接口 19 测试：{passed}/{total} 项通过")
-    for name, ok, detail in RESULTS:
-        if not ok:
-            print(f"  FAIL: {name} — {detail}")
-    print("=" * 84)
-    return 0 if passed == total else 1
+    return 0
 
 
 if __name__ == "__main__":

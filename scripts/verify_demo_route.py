@@ -112,7 +112,15 @@ def main() -> int:
     print("\n[行 3] 智能评价 /evaluation —— 未生产时必须 REPORT_NOT_GENERATED")
     rep = (api("/api/spots/564/report").get("data") or {})
     if rep.get("available"):
-        check("评价已生产（本机已跑过全量）", True, "available=True")
+        # 【两态都要验】Stage 5 生成评价后，这里必须**真的校验内容**，
+        # 而不是像原先那样 `check(..., True)`（那是个永远通过的空断言）。
+        r = rep.get("report") or {}
+        check("评价已生产：summary 非空", bool(r.get("summary")), f"{(r.get('summary') or '')[:40]}")
+        check("评价已生产：优势/关注点为非空列表",
+              bool(r.get("advantages")) and bool(r.get("visitor_focus")),
+              f"优势 {len(r.get('advantages') or [])} 条 / 关注点 {len(r.get('visitor_focus') or [])} 条")
+        check("评价已生产：必须回显事实依据（可追溯）",
+              bool(rep.get("basis")), str((rep.get("basis") or {}).get("source")))
     else:
         check("未生产时 reason = REPORT_NOT_GENERATED（不编造评价）",
               rep.get("reason") == "REPORT_NOT_GENERATED",

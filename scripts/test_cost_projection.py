@@ -25,6 +25,7 @@ sys.path.insert(0, ".")
 
 from app.batch.semantic_analysis import run_semantic_analysis
 from app.batch.spot_report import run_spot_report
+from app.db import query_one
 from app.llm.preflight import collect
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -75,9 +76,25 @@ def main() -> int:
           f"当前就绪事实包 {rep['packages_available']} 份；本次待生成 {rep['pending_api_calls']} 份")
     print(f"  hint: {rep.get('hint', '(无)')}")
 
-    check("业务口径的『可评价景点数』= preflight 的待生成评价份数",
-          rep["eligible_spots"] == pf.workload["spot_report_api_calls"],
-          f"dry-run eligible={rep['eligible_spots']} vs preflight {pf.workload['spot_report_api_calls']}")
+    # 【状态无关】"可评价景点数"是**业务口径**（BR-02 门槛，恒为 57），
+    # 而 preflight 的 `spot_report_api_calls` 是**待生成份数**（已生成的不再计）。
+    # 两者只有在"一份都没生成"时才相等；Stage 5 之后 preflight 会变成 0。
+    # 因此拆成三条稳定成立的断言（旧断言 `eligible == api_calls` 在全量生成后会失败）。
+    check("业务口径的『可评价景点数』= 57（BR-02 门槛，与是否已生成无关）",
+          rep["eligible_spots"] == 57, f"eligible={rep['eligible_spots']}")
+    # preflight 的 `spot_report_api_calls` 定义 = 可评价景点 − **已有评价的景点**。
+    # 注意它与 dry-run 的 `pending_api_calls` **不是同一个口径**：
+    # 后者 = "当前就绪的事实包数"（没有事实包就不会生成，因此 Stage 5 跑 facts 之前为 0）。
+    already_reports = int(query_one("SELECT COUNT(*) AS n FROM spot_report")["n"])
+    check("preflight 的『待生成评价份数』= 可评价景点 − 已生成评价（定义式，两态通用）",
+          pf.workload["spot_report_api_calls"] == rep["eligible_spots"] - already_reports,
+          f"{pf.workload['spot_report_api_calls']} == {rep['eligible_spots']} − {already_reports}")
+    check("dry-run 的『本次待生成』= 当前就绪的事实包数（没有依据就不生成）",
+          rep["pending_api_calls"] == rep["packages_available"],
+          f"pending={rep['pending_api_calls']} available={rep['packages_available']}")
+    check("待生成份数 ≤ 可评价景点数（已生成的不重复计费）",
+          pf.workload["spot_report_api_calls"] <= rep["eligible_spots"],
+          f"{pf.workload['spot_report_api_calls']} ≤ {rep['eligible_spots']}")
     check("『本次待生成』= 当前就绪的事实包数（没有事实包就不该生成）",
           rep["pending_api_calls"] == rep["packages_available"],
           f"pending={rep['pending_api_calls']} available={rep['packages_available']}")

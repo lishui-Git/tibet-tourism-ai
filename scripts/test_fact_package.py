@@ -4,10 +4,15 @@
 承诺：① 评论语义 → 事实包 **0 次模型调用**；② 重复执行**幂等跳过**、不产生多余开销。
 
 做法（全程零 API 消费）：
-    · 统计核心表基线；
-    · 对**单个景点**跑一次 `run_fact_package`（真实执行、写库）；
-    · 再跑一次，验证幂等跳过；
-    · 精确清理本次写入，并证明行数回到基线。
+    · 对**单个景点**做**隔离**：把该景点"测试前"的事实包快照下来并临时清空，
+      使"首次生成"在**任何**库状态下都可测（表为空 / 已跑完全量都行）；
+    · 真实执行一次 `run_fact_package`（写库），再执行一次验证幂等跳过；
+    · 清掉本测试登记的任务；
+    · 出隔离块时把快照**原样写回**——`spot_fact_package` 的生产结果**绝不会被删除或覆盖**。
+
+【为什么必须隔离】旧实现按 `spot_id` 无条件 `DELETE FROM spot_fact_package`。
+在表为空时看不出问题，但 Stage 5 生成 57 份生产事实包后，它会把真实结果删掉
+（并让"回到基线"的断言失败）。这与 Stage 4 踩过的"测试删掉生产复用行"是同一类事故。
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ sys.path.insert(0, ".")
 
 from app.batch.fact_package import run_fact_package
 from app.db import connection, query_one
+from scripts.result_isolation import isolated_spot_results
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -40,28 +46,19 @@ def counts() -> dict[str, int]:
     return {k: int(v) for k, v in row.items()}
 
 
-def main() -> int:
-    print("=" * 84)
-    print("验证 `--stage facts`：0 次模型调用 + 幂等跳过（零 API 消费）")
-    print("=" * 84)
-
-    before = counts()
-    print(f"\n基线：{before}")
-
-    spot = query_one(
-        "SELECT spot_id, spot_name FROM spot WHERE has_full_evaluation=1 ORDER BY spot_id LIMIT 1"
-    )
-    spot_id = int(spot["spot_id"])
-    print(f"测试景点：{spot['spot_name']}({spot_id})")
-
+def run_checks(spot_id: int, base: dict[str, int]) -> None:
+    """隔离块内的检查；`base` 是"该景点已被临时清空"之后的基线。"""
     # ---------- ① 首次生成 ----------
     first = run_fact_package(spot_ids=[spot_id], only_missing=True)
-    check("首次生成成功", first["generated"] == 1, f"generated={first['generated']} skipped={first['skipped']}")
+    check("首次生成成功（该景点已被隔离清空，因此必然是 new）",
+          first["generated"] == 1 and first["skipped"] == 0,
+          f"generated={first['generated']} skipped={first['skipped']}")
     mid = counts()
-    check("事实包行数 +1", mid["pkgs"] == before["pkgs"] + 1, f"{before['pkgs']} → {mid['pkgs']}")
-    check("未写入任何 spot_report（事实包阶段不产出评价）", mid["reports"] == before["reports"], f"{mid['reports']}")
-    check("评论级结果未被改动（事实包只读评论级结果）", mid["deepseek"] == before["deepseek"],
-          f"deepseek={mid['deepseek']}")
+    check("事实包行数 +1", mid["pkgs"] == base["pkgs"] + 1, f"{base['pkgs']} → {mid['pkgs']}")
+    check("未写入任何 spot_report（事实包阶段不产出评价）",
+          mid["reports"] == base["reports"], f"{mid['reports']}")
+    check("评论级结果未被改动（事实包只读评论级结果）",
+          mid["deepseek"] == base["deepseek"], f"deepseek={mid['deepseek']}")
 
     # ---------- ② 重复执行：幂等跳过 ----------
     second = run_fact_package(spot_ids=[spot_id], only_missing=True)
@@ -82,17 +79,42 @@ def main() -> int:
           src.count("from app.llm") == 1 and "ASPECT_CANDIDATES" in src,
           "仅 import 候选方面常量")
 
-    # ---------- 清理 ----------
+    # ---------- ④ 只清本测试登记的任务；景点级结果由隔离层精确还原 ----------
     with connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM spot_fact_package WHERE spot_id=%s", (spot_id,))
             for task_id in {int(first.get("task_id") or 0), int(second.get("task_id") or 0)}:
                 if task_id:
                     cur.execute("DELETE FROM task_log WHERE task_id=%s", (task_id,))
                     cur.execute("DELETE FROM analysis_task WHERE task_id=%s", (task_id,))
     cleaned = counts()
-    check("清理后回到基线（核心表逐项一致）", cleaned == before,
-          f"{before} → {cleaned}")
+    check("任务登记已清理（行数回到隔离后基线）",
+          cleaned["tasks"] == base["tasks"], f"{base['tasks']} → {cleaned['tasks']}")
+    check("本测试只新增 1 份事实包（收尾由隔离层还原为测试前状态）",
+          cleaned["pkgs"] == base["pkgs"] + 1, f"{base['pkgs']} → {cleaned['pkgs']}")
+
+
+def main() -> int:
+    print("=" * 84)
+    print("验证 `--stage facts`：0 次模型调用 + 幂等跳过（零 API 消费）")
+    print("=" * 84)
+
+    spot = query_one(
+        "SELECT spot_id, spot_name FROM spot WHERE has_full_evaluation=1 ORDER BY spot_id LIMIT 1"
+    )
+    spot_id = int(spot["spot_id"])
+    print(f"\n测试景点：{spot['spot_name']}({spot_id})")
+
+    before_all = counts()
+    print(f"隔离前基线：{before_all}")
+
+    with isolated_spot_results([spot_id]):
+        base = counts()
+        print(f"隔离后基线（该景点的事实包已临时清空）：{base}")
+        run_checks(spot_id, base)
+
+    after_all = counts()
+    check("收尾后回到隔离前状态（生产事实包被**精确还原**，未被删除）",
+          after_all == before_all, f"{before_all} → {after_all}")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)

@@ -135,6 +135,21 @@ def check_baseline(doc: str) -> None:
         "spot_report": 0,
         "数据库表数": 17,
     }
+    # 【状态无关断言】景点级结果只有两种合法状态：
+    #   · **未生成** → 0 行（Stage 5 之前）；
+    #   · **已全量生成** → 等于"可评价景点数"（Stage 5 之后）。
+    # "部分生成"（既不是 0 也不是全量）说明生成中断或数据被破坏，必须报错。
+    # 这样本测试在 Stage 5 前后**都**成立，不必每次生成完就来改基线。
+    eligible = actual["可评价景点(≥100条)"]
+    for key in ("spot_fact_package", "spot_report"):
+        got = actual[key]
+        check(
+            f"基线「{key}」∈ {{0（未生成）, {eligible}（已全量生成）}}",
+            got in (0, eligible),
+            f"实际 {got:,}；可评价景点 {eligible}（部分生成属异常）",
+        )
+        expected.pop(key, None)
+
     for key, want in expected.items():
         check(f"基线「{key}」= {want:,}", actual[key] == want, f"实际 {actual[key]:,}")
 

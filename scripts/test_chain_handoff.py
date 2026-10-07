@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.batch.fact_package import run_fact_package
 from app.batch.spot_report import run_spot_report
+from scripts.result_isolation import isolated_spot_results, snapshot_all
 from app.db import connection, query_one
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -55,6 +56,39 @@ def counts() -> dict[str, int]:
 
 
 def main() -> int:
+    """【测试隔离】整表隔离两张景点级结果表：快照 → 清空 → 跑主体 → **精确还原**。
+
+    为什么必须隔离：本测试的立论就是"**起点没有事实包**时 report 不该计划任何调用"，
+    因此它需要一张空表；而 Stage 5 之后库里会有 57 份生产事实包 + 57 份生产评价。
+    旧实现在收尾时 `DELETE FROM spot_fact_package`（整表清空）——那会把生产结果删光。
+    现在改为：进块前快照整表、清空，跑完把快照**原样写回**。
+    """
+    with isolated_spot_results(None) as snap:
+        rc = _run_body()
+
+    after = snapshot_all()
+    print("\n[隔离收尾] 景点级结果表应精确回到测试前状态：")
+    print(f"  spot_fact_package: {len(snap['fact_package'])} → {len(after['fact_package'])}")
+    print(f"  spot_report      : {len(snap['spot_report'])} → {len(after['spot_report'])}")
+    check("隔离层已精确还原（生产事实包/评价未被删除）",
+          len(after["fact_package"]) == len(snap["fact_package"])
+          and len(after["spot_report"]) == len(snap["spot_report"]), "")
+
+    passed = sum(1 for _, ok, _ in RESULTS if ok)
+    total = len(RESULTS)
+    print("\n" + "=" * 88)
+    print(f"生产链路串联验证：{passed}/{total} 项通过")
+    for name, ok, detail in RESULTS:
+        if not ok:
+            print(f"  FAIL: {name} — {detail}")
+    if passed == total:
+        print("结论：facts 的产物能被 report 正确接住，顺序与幂等都对——")
+        print("      全量跑到第 ④ 步不会出现『前面花了钱、却生成不出评价』。")
+    print("=" * 88)
+    return 0 if (rc == 0 and passed == total) else 1
+
+
+def _run_body() -> int:
     print("=" * 88)
     print("生产链路串联验证（facts → report 的接缝；零模型调用）")
     print("=" * 88)
@@ -124,19 +158,7 @@ def main() -> int:
               f"{base} → {left}")
         check("无残留 running 任务",
               int(query_one("SELECT COUNT(*) AS n FROM analysis_task WHERE status='running'")["n"]) == 0, "")
-
-    passed = sum(1 for _, ok, _ in RESULTS if ok)
-    total = len(RESULTS)
-    print("\n" + "=" * 88)
-    print(f"生产链路串联验证：{passed}/{total} 项通过")
-    for name, ok, detail in RESULTS:
-        if not ok:
-            print(f"  FAIL: {name} — {detail}")
-    if passed == total:
-        print("结论：facts 的产物能被 report 正确接住，顺序与幂等都对——")
-        print("      全量跑到第 ④ 步不会出现『前面花了钱、却生成不出评价』。")
-    print("=" * 88)
-    return 0 if passed == total else 1
+    return 0
 
 
 if __name__ == "__main__":

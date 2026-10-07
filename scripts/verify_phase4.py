@@ -45,6 +45,7 @@ from app.batch.fact_package import run_fact_package
 from app.batch.semantic_analysis import run_semantic_analysis
 from app.batch.spot_report import run_spot_report
 from app.db import connection, query_all, query_one
+from scripts.result_isolation import purge, restore, snapshot
 from app.llm.mock import MockClient
 
 RUN_TAG = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -442,16 +443,22 @@ def verify_semantic(samples: dict[str, list[int]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def verify_fact_package() -> list[dict]:
+def verify_fact_package(spot_targets: list[int]) -> list[dict]:
     print("\n[2] C-BAT-06 景点事实包（零模型调用）")
-    summary = run_fact_package(limit=3)
+    # 【测试隔离】只对**显式指定的**几个景点构造事实包；这些景点在进入本测试前已被
+    # `main()` 临时清空（快照保存、收尾还原），因此这里既不会 upsert 覆盖生产事实包，
+    # 也不会因为"库里已有 57 份"而读错对象（旧实现用 `limit=3` 生成、
+    # 再用 `ORDER BY spot_id LIMIT 3` 回读，Stage 5 之后两者会指向**不同的**景点）。
+    summary = run_fact_package(spot_ids=spot_targets)
     check("事实包已生成", summary["generated"] >= 1, f"生成 {summary['generated']} 个景点")
-    TOUCHED_SPOTS.update(
-        int(r["spot_id"]) for r in query_all("SELECT spot_id FROM spot_fact_package ORDER BY spot_id LIMIT 3")
-    )
+    TOUCHED_SPOTS.update(spot_targets)
 
     packages: list[dict] = []
-    for row in query_all("SELECT package_json FROM spot_fact_package ORDER BY spot_id LIMIT 3"):
+    ph = ",".join(["%s"] * len(spot_targets))
+    for row in query_all(
+        f"SELECT package_json FROM spot_fact_package WHERE spot_id IN ({ph}) ORDER BY spot_id",
+        tuple(spot_targets),
+    ):
         package = row["package_json"]
         packages.append(json.loads(package) if isinstance(package, str) else package)
 
@@ -780,6 +787,26 @@ def main(argv: list[str] | None = None) -> int:
             "（重复正文组内复用代表结果），**不会**被本脚本清理。"
         )
 
+    # 【景点级测试隔离】选 3 个显式景点，把它们"测试前"的 spot_fact_package / spot_report
+    # 快照下来并**临时清空**，收尾时精确还原。这样：
+    #   · 不会 upsert 覆盖生产事实包；
+    #   · 不会在"库里已有 57 份"时读错回读对象；
+    #   · mock 评价不会覆盖生产评价，也不会被快照差集漏删而残留。
+    #
+    # 【顺序很重要】**必须在 `SNAPSHOT = snapshot_results()` **之前**清空**：
+    # 收尾时的"回到验证前状态"断言拿 `SNAPSHOT` 当基准，而该快照记录的是
+    # `spot_fact_package` / `spot_report` 的 spot_id 集合。若先取快照再清空，
+    # 基准里会包含被清掉的景点，收尾比对就会因为"少了一个 id"而误报失败。
+    spot_targets = [
+        int(r["spot_id"])
+        for r in query_all("SELECT spot_id FROM spot WHERE has_full_evaluation=1 ORDER BY spot_id LIMIT 3")
+    ]
+    spot_snap = snapshot(spot_targets)
+    purge(spot_targets)
+    print(f"[隔离] 已临时清空 {len(spot_targets)} 个景点的景点级结果 {spot_targets}"
+          f"（快照 fact_package={len(spot_snap['fact_package'])} / report={len(spot_snap['spot_report'])}，"
+          f"收尾精确还原）")
+
     global SNAPSHOT
     SNAPSHOT = snapshot_results()
 
@@ -793,7 +820,7 @@ def main(argv: list[str] | None = None) -> int:
     crashed = False
     try:
         verify_semantic(samples)
-        packages = verify_fact_package()
+        packages = verify_fact_package(spot_targets)
         verify_spot_report(packages)
         if args.full_mock_check:
             full_mock_check()
@@ -825,6 +852,19 @@ def main(argv: list[str] | None = None) -> int:
                   leftover == 0, f"又清掉 {leftover} 条" if leftover else "0 条")
         else:
             print("\n按 --keep 保留测试数据（记得手工清理，避免假数据混入真实结果）")
+
+        # 【景点级还原】无论 `--keep` 与否，都必须把被隔离的这 3 个景点的
+        # **生产结果**原样写回——生产数据的保真度不可让步。
+        purge(spot_targets)
+        restore(spot_snap)
+        after_spot = snapshot(spot_targets)
+        check(
+            "景点级隔离已精确还原（生产 fact_package / spot_report 未被删除或覆盖）",
+            len(after_spot["fact_package"]) == len(spot_snap["fact_package"])
+            and len(after_spot["spot_report"]) == len(spot_snap["spot_report"]),
+            f"fact_package {len(spot_snap['fact_package'])} → {len(after_spot['fact_package'])}；"
+            f"report {len(spot_snap['spot_report'])} → {len(after_spot['spot_report'])}",
+        )
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
