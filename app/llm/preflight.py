@@ -24,6 +24,16 @@ from typing import Any, Sequence
 from app import __version__
 from app.db import query_all, query_one
 
+# 【口径统一】直接复用**正式 validator 的判断函数**，而不是在 SQL 里另写一套比较。
+# 为什么必须这样做：原先 preflight 用 MySQL `LOCATE(evidence, content)` 做严格原文子串匹配，
+# 而 `validators._evidence_is_substring()` 在严格匹配失败后还会**去空白再比一次**
+# （Python `re` 的 `\s` 覆盖全角空格 U+3000、不间断空格 U+00A0 等 Unicode 空白）。
+# 两者语义不同 → 全量运行后 preflight 把 11 条**合法**证据误报为 BLOCKED。
+# 现在改为"SQL 只负责粗筛候选，最终判定交给 validator 本函数"，
+# 从构造上保证两套口径永远一致（单一事实来源），而不是靠两处各写一份规则去"对齐"。
+# 注意：这不放宽"evidence 必须可追溯到原评论"的要求——真正编造的 evidence 仍会被判定并阻断。
+from app.llm.validators import _evidence_is_substring as _validator_evidence_ok
+
 # ---------------------------------------------------------------------------
 # 一、基准值（冻结事实，改动必须写明原因）
 # ---------------------------------------------------------------------------
@@ -131,6 +141,8 @@ class Preflight:
     cost: dict[str, Any] = field(default_factory=dict)
     # 待处理评论的正文长度分桶 `[{bucket, n, avg_chars}, ...]`（成本校准证据）
     length_buckets: list[dict[str, Any]] = field(default_factory=list)
+    # evidence 与原文**仅空白写法不同**、但 validator 判定合法的方面行（只提示，不阻断）
+    evidence_whitespace_only: list[dict[str, Any]] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)      # 阻断项（BLOCKED）
     warnings: list[str] = field(default_factory=list)    # 提示项（不阻断，但必须知情）
 
@@ -148,6 +160,7 @@ class Preflight:
             "core_tables": self.core_tables,
             "cost": self.cost,
             "length_buckets": self.length_buckets,
+            "evidence_whitespace_only": len(self.evidence_whitespace_only),
             "issues": self.issues,
             "warnings": self.warnings,
             "status": self.status,
@@ -157,6 +170,17 @@ class Preflight:
 # ---------------------------------------------------------------------------
 # 二、SQL（全部只读）
 # ---------------------------------------------------------------------------
+
+# 「真实 API 调用的 usage」筛选条件（成本校准证据专用）。
+# 【为什么必须限定 source='deepseek'】复用层（`source='reuse'`）的 usage 是**全 0**
+# （复用不产生费用，见 `semantic_analysis._build_reuse_raw`）。若不排除它们，
+# "最小 token" 会显示成 0，把校准证据误导成"存在 0 token 的真实调用"。
+# 全量运行后这类行有 1,071 条，因此必须排除。
+_REAL_API_USAGE_WHERE = (
+    "method='deepseek' "
+    "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.source'))='deepseek' "
+    "AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL"
+)
 
 SQL = {
     "review_total": "SELECT COUNT(*) FROM review",
@@ -229,16 +253,16 @@ SQL = {
            AND NOT EXISTS (SELECT 1 FROM spot_report sr WHERE sr.spot_id = s.spot_id)
     """,
     # ---- 成本校准证据（只读）------------------------------------------------
-    # 现存真实 usage 的条数/最小/最大/合计。这几个数**必须**能被 SQL 直接复核，
+    # 现存**真实 API** usage 的条数/最小/最大/合计。这几个数**必须**能被 SQL 直接复核，
     # 因为 `MEASURED_TOKENS_PER_CALL_MIN/MAX` 就是按它们定的（见文件顶部说明）。
-    "usage_rows": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
-                  "AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+    # 限定 `source='deepseek'` 的理由见 `_REAL_API_USAGE_WHERE` 的定义处。
+    "usage_rows": f"SELECT COUNT(*) FROM sentiment WHERE {_REAL_API_USAGE_WHERE}",
     "usage_min_tokens": "SELECT COALESCE(MIN(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
-                        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+                        f"FROM sentiment WHERE {_REAL_API_USAGE_WHERE}",
     "usage_max_tokens": "SELECT COALESCE(MAX(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
-                        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+                        f"FROM sentiment WHERE {_REAL_API_USAGE_WHERE}",
     "usage_sum_tokens": "SELECT COALESCE(SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.usage.total_tokens')) AS UNSIGNED)),0) "
-                        "FROM sentiment WHERE method='deepseek' AND JSON_EXTRACT(raw_json,'$.usage') IS NOT NULL",
+                        f"FROM sentiment WHERE {_REAL_API_USAGE_WHERE}",
     # 待处理调用层里，正文长度**超出样本覆盖范围**（>126 字，即库内 usage 样本的最长正文）的条数。
     # 为什么单独用一条 SQL 而不是从长度分桶里估：126 落在"101–150"桶内部，
     # 用桶平均值判断会把该桶整桶算错（实测差 1,534 条）。这里与"调用层待处理"完全同口径。
@@ -324,9 +348,12 @@ INTEGRITY_SQL = {
                    "WHERE se.method='deepseek' AND s.spot_id IS NULL",
     "orphan_review": "SELECT COUNT(*) FROM sentiment se LEFT JOIN review r ON r.comment_id = se.comment_id "
                      "WHERE se.method='deepseek' AND r.comment_id IS NULL",
-    "evidence_not_in_content": "SELECT COUNT(*) FROM aspect a JOIN review r ON r.comment_id = a.comment_id "
-                              "WHERE a.method='deepseek' AND a.evidence IS NOT NULL AND a.evidence <> '' "
-                              "AND LOCATE(a.evidence, r.content) = 0",
+    # 【粗筛候选】严格原文子串匹配失败的方面行。
+    # 这只是**候选集**：其中有些是"仅空白写法不同"的合法证据（validator 会放行），
+    # 真正的违规由 `_validator_evidence_ok` 复核后确定（见 `collect_evidence_violations`）。
+    "evidence_strict_mismatch": "SELECT COUNT(*) FROM aspect a JOIN review r ON r.comment_id = a.comment_id "
+                                "WHERE a.method='deepseek' AND a.evidence IS NOT NULL AND a.evidence <> '' "
+                                "AND LOCATE(a.evidence, r.content) = 0",
     "open_failures": "SELECT COUNT(*) FROM task_log WHERE level='ERROR' AND stage='semantic' AND resolved=0",
     "usage_missing": "SELECT COUNT(*) FROM sentiment WHERE method='deepseek' "
                      "AND JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.source'))='deepseek' "
@@ -433,6 +460,40 @@ LAYERING_SQL: dict[str, str] = {
 def _scalar(sql: str) -> int:
     row = query_one(sql) or {}
     return int(list(row.values())[0] or 0)
+
+
+# 候选：严格子串匹配失败的方面行（需要再用 validator 的口径复核）
+EVIDENCE_CANDIDATE_SQL = """
+    SELECT a.comment_id, a.aspect_name, a.evidence, r.content
+      FROM aspect a JOIN review r ON r.comment_id = a.comment_id
+     WHERE a.method = 'deepseek'
+       AND a.evidence IS NOT NULL AND a.evidence <> ''
+       AND LOCATE(a.evidence, r.content) = 0
+"""
+
+
+def collect_evidence_violations() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把"严格匹配失败"的候选行，用**正式 validator 的口径**复核后分成两组。
+
+    返回 `(genuine, whitespace_only)`：
+      · `genuine`        —— validator 也判定不在原文中 ⇒ **真违规**（模型编造），应当阻断；
+      · `whitespace_only`—— validator 判定合法（差异仅是空白写法，如全角空格 U+3000）⇒ 只提示，不阻断。
+
+    为什么用 Python 复核而不是把空白归一化写进 SQL：SQL 的 `REPLACE(x,' ','')` 只能处理
+    半角空格，处理不了 U+3000 / U+00A0 等 Unicode 空白，两处规则迟早再次漂移。
+    复用 validator 本函数可保证"同一份判断只有一处实现"。
+    """
+    rows = query_all(EVIDENCE_CANDIDATE_SQL)
+    genuine: list[dict[str, Any]] = []
+    whitespace_only: list[dict[str, Any]] = []
+    for row in rows:
+        evidence = str(row.get("evidence") or "")
+        content = str(row.get("content") or "")
+        if _validator_evidence_ok(evidence, content):
+            whitespace_only.append(row)
+        else:
+            genuine.append(row)
+    return genuine, whitespace_only
 
 
 def core_table_checks() -> list[dict[str, Any]]:
@@ -567,6 +628,13 @@ def collect() -> Preflight:
     result.layering = {key: _scalar(sql) for key, sql in LAYERING_SQL.items()}
     result.core_tables = core_table_checks()
 
+    # ---- evidence 可追溯性：用 validator 的口径复核（口径统一的落点）--------
+    # `evidence_strict_mismatch` 是 SQL 粗筛出的候选数（含"仅空白差异"的合法行）；
+    # 真正的阻断项 `evidence_not_in_content` 只统计 validator 也判定违规的行。
+    genuine_violations, whitespace_only = collect_evidence_violations()
+    result.evidence_whitespace_only = whitespace_only
+    result.integrity["evidence_not_in_content"] = len(genuine_violations)
+
     # ---- 阻断项（BLOCKED 的判据）-------------------------------------------
     # 只有"数据本身有问题、会导致结果不可信"的才阻断；
     # 历史性的口径局限（例如早期调用未落库 usage）只提示，不阻断——否则会永远无法开工。
@@ -671,6 +739,14 @@ def collect() -> Preflight:
             f"{result.integrity['open_failures']} 条失败记录未解决（task_log.resolved=0）；"
             "全量重跑会自动重试这些评论，无需手工处理"
         )
+    if result.evidence_whitespace_only:
+        sample = ", ".join(str(r.get("comment_id")) for r in result.evidence_whitespace_only[:5])
+        warnings.append(
+            f"{len(result.evidence_whitespace_only)} 条 aspect 的 evidence 与原文**仅空白写法不同**"
+            f"（严格子串匹配不中，但 validator 的空白归一化匹配通过 ⇒ 判定合法；不阻断）。"
+            f"示例 comment_id：{sample}。"
+            "此项已与正式 validator 口径统一（preflight 直接复用 validator 的判断函数）"
+        )
     if call_pending == 0 and report_pending == 0:
         warnings.append("当前没有待处理的调用：数据可能已经生产完毕，重复运行不会产生费用")
     result.warnings = warnings
@@ -756,12 +832,20 @@ def print_report(preflight: Preflight | None = None) -> dict[str, Any]:
         print(f"  费用口径说明           : {cost['retry_note']}")
 
     print("\n[5] 数据完整性")
-    bad = {k: v for k, v in integrity.items() if v and k not in ("usage_missing", "open_failures")}
+    # `evidence_strict_mismatch` 是粗筛候选（含"仅空白差异"的合法行），只作展示、不参与判定
+    bad = {
+        k: v for k, v in integrity.items()
+        if v and k not in ("usage_missing", "open_failures", "evidence_strict_mismatch")
+    }
     if bad:
         for key, value in bad.items():
             print(f"  ✗ {key} = {value}")
     else:
         print("  ✓ 无重复结果、无非法枚举、无越界数值、无孤立外键、无不在原文中的证据")
+    strict_gap = integrity.get("evidence_strict_mismatch", 0) - integrity.get("evidence_not_in_content", 0)
+    if strict_gap:
+        print(f"  · evidence 与原文**仅空白写法不同**的方面行 {strict_gap} 条"
+              f"（严格子串匹配不中，但 validator 的空白归一化匹配通过 ⇒ 合法，不阻断）")
 
     print("\n[6] 核心数据是否被改动（spot / review 冻结基准）")
     for table in pf.core_tables:
