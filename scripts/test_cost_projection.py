@@ -89,15 +89,23 @@ def main() -> int:
     check("preflight 的『待生成评价份数』= 可评价景点 − 已生成评价（定义式，两态通用）",
           pf.workload["spot_report_api_calls"] == rep["eligible_spots"] - already_reports,
           f"{pf.workload['spot_report_api_calls']} == {rep['eligible_spots']} − {already_reports}")
-    check("dry-run 的『本次待生成』= 当前就绪的事实包数（没有依据就不生成）",
-          rep["pending_api_calls"] == rep["packages_available"],
+    # 【状态无关 · 口径修正】dry-run 的 `pending_api_calls` = "**有事实包且还没有评价**"的份数，
+    # 因此正确的不变式是 `pending = packages_available − already_generated`，
+    # **不是** `pending == packages_available`。
+    # 旧写法只在"一份评价都没生成"时成立；Stage 5 正式 report 跑完后
+    # （57 份评价已存在、57 份事实包就绪）pending 会变成 0 而 available 仍是 57 → 必然误报。
+    check("dry-run 不变式：本次待生成 = 就绪事实包 − 已生成评价（两态通用）",
+          rep["pending_api_calls"] == rep["packages_available"] - rep["already_generated"],
+          f"{rep['pending_api_calls']} == {rep['packages_available']} − {rep['already_generated']}")
+    check("本次待生成 ≤ 就绪事实包数（已生成的不重复计费）",
+          rep["pending_api_calls"] <= rep["packages_available"],
           f"pending={rep['pending_api_calls']} available={rep['packages_available']}")
     check("待生成份数 ≤ 可评价景点数（已生成的不重复计费）",
           pf.workload["spot_report_api_calls"] <= rep["eligible_spots"],
           f"{pf.workload['spot_report_api_calls']} ≤ {rep['eligible_spots']}")
-    check("『本次待生成』= 当前就绪的事实包数（没有事实包就不该生成）",
-          rep["pending_api_calls"] == rep["packages_available"],
-          f"pending={rep['pending_api_calls']} available={rep['packages_available']}")
+    check("『本次待生成』不可能超过『可评价景点数』",
+          rep["pending_api_calls"] <= rep["eligible_spots"],
+          f"pending={rep['pending_api_calls']} eligible={rep['eligible_spots']}")
     check("事实包为空时给出可照做的提示（先跑 --stage facts）",
           (rep["packages_available"] > 0) or ("--stage facts" in (rep.get("hint") or "")),
           (rep.get("hint") or "")[:70])

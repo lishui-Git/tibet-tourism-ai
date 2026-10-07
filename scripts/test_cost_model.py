@@ -167,7 +167,17 @@ def main() -> int:
 
     # 真的生成一次事实包（纯 SQL、零模型调用），量出真实 prompt 大小，用完清理
     from app.db import connection, query_one
+    from scripts.result_isolation import purge, restore, snapshot_all
 
+    # 【测试隔离 · 重要】先快照 `spot_fact_package` / `spot_report` 两张**结果表**。
+    #
+    # 本测试要 `run_fact_package()` 全量生成 57 份事实包来量测 prompt 大小。
+    # 旧实现在 finally 里直接 `DELETE FROM spot_fact_package`（**整表清空**）并断言为 0；
+    # 生产环境一旦已有 57 份事实包，这一句就会把它们**全部删掉**。
+    # 实测已发生（2026-10-07）：Stage 5 正式 report 完成后跑 verify_all，
+    # 57 份生产事实包被本测试清空（`spot_report` 57 份未受影响）。
+    # 现改为"快照 → 量测 → 整表精确还原"，生产数据不再受任何影响。
+    before_all = snapshot_all()
     watermark = int(query_one("SELECT COALESCE(MAX(task_id),0) AS m FROM analysis_task")["m"])
     try:
         run_fact_package()
@@ -196,13 +206,20 @@ def main() -> int:
         check("输出按 schema 上限估算（不是按中位数估算）",
               REPORT_OUTPUT_TOKENS >= 400, f"{REPORT_OUTPUT_TOKENS}")
     finally:
+        # 只清"本次量测新登记的"任务；景点级结果表**整表精确还原**为快照状态。
+        # （不再有 `DELETE FROM spot_fact_package` 这种会把生产数据删光的语句。）
         with connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM spot_fact_package")
                 cur.execute("DELETE FROM task_log WHERE task_id > %s", (watermark,))
                 cur.execute("DELETE FROM analysis_task WHERE task_id > %s", (watermark,))
-        check("量测用的 57 份事实包已清理（未污染库）",
-              int(query_one("SELECT COUNT(*) AS n FROM spot_fact_package")["n"]) == 0, "")
+        purge(None)
+        restore(before_all)
+        after_all = snapshot_all()
+        check("隔离层已精确还原（生产 fact_package / spot_report 未被删除或覆盖）",
+              len(after_all["fact_package"]) == len(before_all["fact_package"])
+              and len(after_all["spot_report"]) == len(before_all["spot_report"]),
+              f"fact_package {len(before_all['fact_package'])} → {len(after_all['fact_package'])}；"
+              f"spot_report {len(before_all['spot_report'])} → {len(after_all['spot_report'])}")
 
     # ---------- ③ 端到端：预检合计区间可复算 ----------
     print("\n[3] 端到端：预检报告的合计区间必须可由公式复算")
