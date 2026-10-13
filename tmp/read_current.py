@@ -6,7 +6,7 @@ try:
 except Exception:
     pass
 
-P = r"E:\tibet-tourism-ai\开题\NIIT-GUET-2023-Class-2316030201-开题报告.docx"
+P = r"E:\tibet-tourism-ai\docs\开题\NIIT-GUET-2023-Class-2316030201-开题报告.docx"
 z = zipfile.ZipFile(P)
 print("=== zip 部件 ===")
 for n in z.namelist():

@@ -5,7 +5,7 @@ try:
 except Exception:
     pass
 
-z = zipfile.ZipFile(r"E:\tibet-tourism-ai\开题\业务需求文档.docx")
+z = zipfile.ZipFile(r"E:\tibet-tourism-ai\docs\开题\业务需求文档.docx")
 x = z.read("word/document.xml").decode("utf-8")
 t = "".join(re.findall(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", x, re.S))
 

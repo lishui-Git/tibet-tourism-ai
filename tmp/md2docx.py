@@ -296,8 +296,8 @@ def build(md_path, out_path, cover_title, cover_lines):
 
 if __name__ == "__main__":
     build(
-        r"E:\tibet-tourism-ai\开题\业务需求文档.md",
-        os.environ.get("BRD_OUT") or r"E:\tibet-tourism-ai\开题\业务需求文档.docx",
+        r"E:\tibet-tourism-ai\docs\开题\业务需求文档.md",
+        os.environ.get("BRD_OUT") or r"E:\tibet-tourism-ai\docs\开题\业务需求文档.docx",
         "业务需求文档（BRD）",
         ["项目名称：基于 DeepSeek 的西藏旅游景点智能评价与分析系统",
          "文档版本：V1.1",
