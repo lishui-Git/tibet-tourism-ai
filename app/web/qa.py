@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -246,6 +247,17 @@ def _facts_spot_evaluation(spots: list[dict[str, Any]]) -> QaFacts:
             items.append({"指标": "差评率（1-2 星占比）", "值": float(stat["negative_rate"]) if stat["negative_rate"] is not None else None})
         if report:
             items.append({"指标": "已生成的智能评价（离线）", "值": report["summary"]})
+            if report.get("need_review"):
+                # 【2026-10 表达规范 / §12 尊重已有数据质量标记】
+                # 这里此前 SELECT 了 need_review 却没有使用——模型拿到这段离线评价时
+                # **不知道**它带着保守复核标记（41/57 份如此），有可能把它当成"已证实"的结论。
+                # 现在把标记如实写进事实（同时呈现给用户），但**用游客能读懂的说法**：
+                # 不说"need_review/校验器/保守标记/事实清单"，只说"已核对、有个别口径提示"。
+                items.append({
+                    "指标": "数据说明",
+                    "值": ("部分统计数据存在一致性提示，相关内容已由系统核对；"
+                           "阅读时建议结合样本量综合判断"),
+                })
         facts.blocks.append(
             {
                 "source": "stat_spot" + ("、spot_report" if report else ""),
@@ -400,7 +412,9 @@ def _facts_sentiment_explain(spots: list[dict[str, Any]]) -> QaFacts:
             }
         )
     facts.sample_size = total
-    facts.caliber_note = CALIBER_ASPECT + " 情感为 deepseek 口径（与 mllib 基线不可混用）。"
+    # 【2026-10 表达规范】这句会**直接渲染给用户**，因此不出现"口径"这类内部术语，
+    # 改为说清"两套统计方式各算各的、不能混用"。字段名与接口契约不变。
+    facts.caliber_note = CALIBER_ASPECT + " 情感结果有两套统计方式，各算各的、不能混用。"
     return facts
 
 
@@ -540,16 +554,26 @@ def build_context(facts: QaFacts) -> list[dict[str, Any]]:
 # 越界承诺词（§15.E.4 的"越界检测"）：回答里若出现，替换为能力边界说明
 BOUNDARY_WORDS = ("路线", "行程", "门票预订", "订票", "天气", "酒店", "机票", "包车", "自驾")
 
+# 【2026-10 QA 闭环】星级区间（"4-5 星""1-2 星"）里的数字是**结构性标注**，
+# 不是引用的事实数字。不排除会产生误报——实测真实调用中"好评率（4-5 星占比）"
+# 的 5 被判为"在事实中找不到对应值"。（阈值本身仍保留 <3 的既有口径，不放宽强度。）
+_RATING_RANGE_RE = re.compile(r"\d+\s*[-–~至]\s*\d+\s*星")
+
 BOUNDARY_REPLACEMENT = (
     "（本系统只基于旅游评论数据的分析结果作答，不提供路线规划、票务预订、天气等实时信息。）"
 )
 
 OUT_OF_SCOPE_ANSWER = (
-    "本系统仅基于旅游评论数据分析结果回答问题，不支持路线规划、票务预订、酒店与天气等实时信息。"
-    "可回答的问题包括：景点评价咨询、景点对比、游客关注点、情感与评价方面解释、数据指标查询与景点排行。"
+    "这个问题目前不在本系统的分析范围内。"
+    "本系统仅基于旅游评论数据，可以帮你了解景点的游客评价、游客都在关注什么，"
+    "以及两个景点在评价上的差异；不支持路线规划、天气、订票等实时信息。"
 )
 
-QA_PROMPT_V1 = "p1"
+# 【2026-10 QA 闭环】Prompt 版本号**只保留一处真源**（`app/llm/prompts.py` 的
+# `QA_PROMPT_VERSION`），在真正要调用模型时按函数级导入读取——与 compare.py 的做法一致。
+# 为什么不在这里再写一份：模板已经改了（补齐"禁止推荐 / 不得把缺失当 0 / 不得混用
+# 情感口径"等约束），两处各写一份迟早会对不上；同时 Web 层仍保持
+# **模块级不导入 app.llm** 的架构约束（只在函数内导入）。
 
 
 def validate_answer(answer: str, facts: QaFacts) -> tuple[str, int, list[str]]:
@@ -575,11 +599,23 @@ def validate_answer(answer: str, facts: QaFacts) -> tuple[str, int, list[str]]:
     if allowed:
         import re
 
-        for token in re.findall(r"\d+(?:\.\d+)?", text):
+        # 【2026-10 表达规范】回答现在被要求写成"人读的形式"（千分位、百分数），
+        # 因此扫描前必须做三件事，否则会把**正确写法**误判成编造数字（实测踩到）：
+        #   ① 剔除星级区间标注（"4-5 星"）；
+        #   ② 合并千分位（"3,965" → "3965"，否则会被切成 3 与 965 两个 token）；
+        #   ③ 兼容百分数写法（事实里比率是 0.8782，回答会写 87.8%）。
+        scan_text = _RATING_RANGE_RE.sub("星级区间", text)
+        scan_text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", scan_text)
+        for token in re.findall(r"\d+(?:\.\d+)?", scan_text):
             value = float(token)
             if value < 3:      # 1–2 这类结构性小数字（条数、星级）不参与判定
                 continue
-            if not any(abs(value - candidate) <= max(0.5, abs(candidate) * 0.01) for candidate in allowed):
+            candidates = (value, value / 100.0)
+            if not any(
+                abs(c - candidate) <= max(0.5, abs(candidate) * 0.01)
+                for c in candidates
+                for candidate in allowed
+            ):
                 need_review = 1
                 notes.append(f"回答中的数字 {token} 在提供的结构化事实中找不到对应值，已标记待复核")
                 break
@@ -599,11 +635,24 @@ def _collect_numbers(facts: QaFacts) -> list[float]:
                 walk(value)
         elif isinstance(node, bool):
             return
+        elif isinstance(node, str):
+            # 【2026-10 QA 闭环】数字也可能藏在**字符串事实**里：例如离线评价摘要中的
+            # 评论时间区间"2016-04-30 至 2026-09-16"、方面说明"样本不足（<10 条）"。
+            # 这些同样是"提供给了模型"的事实，引用它们不属于编造——实测中真实调用
+            # 正是因为引用了 2016 而被误标 need_review=1。字符串里的数字一并纳入白名单。
+            for token in re.findall(r"\d+(?:\.\d+)?", node):
+                values.append(float(token))
         elif isinstance(node, (int, float)):
             values.append(float(node))
 
     for block in facts.blocks:
         walk(block["items"])
+    # 【2026-10 QA 闭环】口径说明同样会随上下文送给模型（build_context 里单列一段），
+    # 其中的数字（如"评论量 ≥ 100 条"的门槛、"≥ 10 条"的方面门槛）属于**可引用范围**。
+    # 此前只收集 blocks 里的数字，导致回答照抄门槛值 100 时被误标为"编造数字"——
+    # 实测发生（真实调用中 need_review 因此被置 1）。这里把口径文本里的数字一并纳入。
+    for token in re.findall(r"\d+(?:\.\d+)?", facts.caliber_note or ""):
+        values.append(float(token))
     return values
 
 
@@ -732,7 +781,7 @@ def _generate_answer(
 ) -> dict[str, Any]:
     """调用 DeepSeek 生成回答（**仅在 `APP_QA_LIVE=1` 时执行**）。"""
     from app.llm.client import DeepSeekClient, LlmError
-    from app.llm.prompts import build_qa_messages
+    from app.llm.prompts import QA_PROMPT_VERSION, build_qa_messages
     from app.llm.validators import ValidationError
 
     client = DeepSeekClient()
@@ -760,7 +809,7 @@ def _generate_answer(
             "need_review": need_review,
             "validation_notes": notes,
             "model": response.model,
-            "prompt_version": QA_PROMPT_V1,
+            "prompt_version": QA_PROMPT_VERSION,
             "token_usage": int(response.usage.get("total_tokens") or 0),
         },
     )

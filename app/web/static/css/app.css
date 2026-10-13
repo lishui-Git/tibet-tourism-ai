@@ -75,7 +75,7 @@
   --flag-green: #2c7a52;
   --flag-yellow: #d9a227;
 
-  --nav-h: 60px;
+  --nav-h: 64px;
   --page-max: 1200px;
   /* 正文可读宽度：超过则行长过长，阅读体验下降 */
   --read-max: 74ch;
@@ -108,9 +108,11 @@ a { color: var(--c-primary); }
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 100;
-  background: var(--c-surface);
-  border-bottom: 1px solid var(--c-line);
-  box-shadow: var(--shadow-sm);
+  /* 【2026-10 导航醒目化】白 → 极浅青的渐层，比纯白更"有厚度"，
+     与页面底色（--c-bg 浅灰蓝）的分界更明确；底部由 ::after 的经幡色带收口。 */
+  background: linear-gradient(180deg, #ffffff 0%, #f1f8fb 100%);
+  border-bottom: 0;
+  box-shadow: 0 2px 12px rgba(16, 44, 63, .10);
 }
 .topbar-inner {
   max-width: var(--page-max);
@@ -134,13 +136,24 @@ a { color: var(--c-primary); }
 }
 .brand h1 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: .2px;
-  color: var(--c-text);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  color: var(--c-primary-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 站名前的一枚经幡方点（与首页 Hero 徽标同一手法：黄→红两级渐变）——
+   面积很小，只做"这是藏地系统"的识别锚点，不喧宾夺主。 */
+.brand h1::before {
+  content: "";
+  display: inline-block;
+  width: 9px; height: 9px;
+  margin-right: 8px;
+  border-radius: 2px;
+  vertical-align: 1px;
+  background: linear-gradient(135deg, var(--flag-yellow), var(--flag-red));
 }
 /* 副标题在导航里保留但弱化；窄屏隐藏以让出空间 */
 .brand .subtitle {
@@ -156,23 +169,43 @@ a { color: var(--c-primary); }
 .mainnav {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
   margin-left: auto;
   flex-shrink: 0;
   min-width: 0;
 }
+/* 导航项：字号／字重／内边距都比正文更"立"一点，胶囊圆角便于高亮时形成色块 */
 .mainnav a {
   position: relative;
   color: var(--c-text-2);
   text-decoration: none;
-  font-size: 14px;
-  padding: 6px 12px;
-  border-radius: var(--r-md);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 8px 14px;
+  border: 1px solid transparent;   /* 预留边框位，避免 hover 时元素跳动 */
+  border-radius: 999px;
   white-space: nowrap;
-  transition: background .15s, color .15s;
+  transition: background .15s, color .15s, border-color .15s, box-shadow .15s;
 }
-.mainnav a:hover { background: var(--c-surface-2); color: var(--c-text); }
-.mainnav a.active { color: var(--c-primary); font-weight: 600; background: var(--c-primary-soft); }
+.mainnav a:hover {
+  background: var(--c-primary-soft);
+  color: var(--c-primary-dark);
+  border-color: #cfe4ee;
+}
+/* 键盘可达性：焦点环必须清晰可见（鼠标点击不触发 :focus-visible，不会误显示） */
+.mainnav a:focus-visible {
+  outline: 2px solid var(--c-primary-light);
+  outline-offset: 2px;
+}
+/* 当前栏目：藏蓝青实心胶囊 + 白字，是全站对比度最高的一处高亮 */
+.mainnav a.active {
+  color: #fff;
+  background: linear-gradient(180deg, var(--c-primary) 0%, var(--c-primary-dark) 100%);
+  border-color: var(--c-primary-dark);
+  box-shadow: 0 2px 8px rgba(13, 85, 112, .26);
+}
+.mainnav a.active:hover { color: #fff; }
 /* 管理员入口与业务导航之间加一道分隔，视觉上降级 */
 .mainnav .nav-sep {
   width: 1px; height: 18px; background: var(--c-line-strong);
@@ -188,6 +221,14 @@ a { color: var(--c-primary); }
   padding: var(--sp-6) var(--sp-5) var(--sp-7);
   display: grid;
   gap: var(--sp-5);
+  /* 【2026-10 内页视觉同步 · 窄屏布局修正】
+     原先是隐式的 auto 轨道：轨道的尺寸取决于各卡片的最小内容宽度，
+     因此只要有一张宽表（例如「景点排行」的 7 列 `.data-table`）在窄屏放不下，
+     整页就会被撑宽、出现横向溢出（实测 500px 下溢出 58px，且与是否展开景点详情无关）。
+     显式写成 minmax(0, 1fr) 后，轨道**不会**超过容器宽度：
+     宽表改为在自己所在的卡片内部横向滚动（.data-table 本身就是滚动容器），
+     页面级横向溢出消失。宽屏下 1fr 等价于原来的占满整行，桌面版式完全不变。 */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .page-head { margin-bottom: var(--sp-1); }
@@ -287,6 +328,15 @@ input[type=text] { min-width: 220px; }
 
 /* =============================================================================
    统计卡片
+   -----------------------------------------------------------------------------
+   【2026-10 内页视觉同步】原来的 .stat 是"浅灰底 + 24px 数字"的扁平块，
+   而首页的重点数字用的是 .kpi（白卡 + 圆角 + 阴影 + 左侧渐变强调条 + 大号数字）。
+   两者并排出现在同一系统里会像两套设计，因此这里把 .stat 提升为**同一套材质**：
+     · 白底、--r-lg 圆角、--shadow-sm 阴影、1px 边框 → 与 .card / .kpi 一致；
+     · 左侧 3px 渐变强调条 → 与 .kpi::before 同一语言（重点有视觉锚点）；
+     · 数字加大到 28px 并等宽对齐（--kpi 是 38px，作为次级数字块略小一档）。
+   为什么只改 CSS：.stat 由 window.UI.statCards() 统一产出，
+   改样式即可让总览/景点/智能分析/对比/管理端**一起**对齐首页，不动任何页面脚本。
    ============================================================================= */
 .stat-grid {
   display: grid;
@@ -295,24 +345,39 @@ input[type=text] { min-width: 220px; }
   margin: var(--sp-4) 0;
 }
 .stat {
-  background: var(--c-surface-2);
+  position: relative;
+  background: var(--c-surface);
   border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  padding: var(--sp-4);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-4) var(--sp-3) var(--sp-5);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.stat-label { font-size: 12.5px; color: var(--c-muted); letter-spacing: .2px; }
+/* 左侧强调条：与首页 .kpi::before 完全同一条渐变 */
+.stat::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--c-primary), var(--c-primary-light));
+}
+/* 数字在前、标签在后：与首页 .kpi 的阅读顺序一致（先看数，再看它是什么）。
+   用 order 调整，HTML 结构（label→value→sub）与 statCards() 的产出保持不变。 */
+.stat-label { order: 2; font-size: 12.5px; color: var(--c-muted); letter-spacing: .2px; }
 .stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.25;
+  order: 1;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -.5px;
   color: var(--c-primary);
   font-variant-numeric: tabular-nums;
   word-break: break-word;
 }
-.stat-sub { font-size: 12px; color: var(--c-muted); line-height: 1.5; }
+.stat-sub { order: 3; font-size: 12px; color: var(--c-muted); line-height: 1.5; }
 
 /* =============================================================================
    图表
@@ -601,16 +666,31 @@ details.fold .fold-body > :first-child { margin-top: 0; }
 
 /* =============================================================================
    智能评价版式
+   -----------------------------------------------------------------------------
+   【2026-10 表达规范】`.rep-summary` / `.qa-answer` 承载的是**结论**（景点综合评价、
+   两个景点的差异说明、智能问答的回答）。它们是页面主角，因此用与 `.card` 同一套
+   材质（白底 + 圆角 + 阴影 + 左侧强调条），正文放大到 15.5px、行高放宽；
+   而数据依据、限制说明与质量提示保持 `.hint` / `.caliber` / `<details>` 的弱化样式。
    ============================================================================= */
 .rep-summary {
-  background: var(--c-surface-2);
-  border-left: 3px solid var(--c-primary);
-  border-radius: 0 var(--r-md) var(--r-md) 0;
-  padding: var(--sp-4) var(--sp-5);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-left: 4px solid var(--c-primary);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
   margin: var(--sp-4) 0;
 }
 .rep-summary h3 { margin-top: 0; border: 0; padding-left: 0; }
 .rep-summary p { margin: var(--sp-2) 0 0; line-height: 1.95; max-width: var(--read-max); }
+.rep-summary h4 {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: 13px;
+  letter-spacing: .06em;
+  color: var(--c-primary);
+}
+.rep-summary h4:first-child { margin-top: 0; }
+.rep-summary ul { margin: 0 0 0 18px; padding: 0; font-size: 15px; line-height: 1.95; }
 
 .rep-grid {
   display: grid;
@@ -645,6 +725,11 @@ details.fold .fold-body > :first-child { margin-top: 0; }
 }
 .review.pos { border-left-color: var(--c-ok); }
 .review.neg { border-left-color: var(--c-bad); }
+/* 【2026-10】中评（3 星）：评价页的「游客真实声音」要覆盖正面/中性/负面，
+   中性用灰色竖线，与好评（绿）、差评（红）区分开，不做额外装饰。 */
+.review.neu { border-left-color: var(--c-muted); }
+.voice-group { margin: var(--sp-4) 0 0; }
+.voice-group h4 { margin: 0 0 var(--sp-2); font-size: 14px; font-weight: 700; }
 .review-meta { font-size: 12px; color: var(--c-muted); margin-bottom: 3px; }
 .review-text { font-size: 13.5px; line-height: 1.85; }
 
@@ -671,16 +756,26 @@ details.fold .fold-body > :first-child { margin-top: 0; }
 
 /* =============================================================================
    智能问答
+   -----------------------------------------------------------------------------
+   「回答」是这一页的主角（与 `.rep-summary` 同一套材质）；数据依据、口径与
+   质量提示一律弱化：`.hint` / `.caliber` / `<details class="fold">`。
    ============================================================================= */
 .qa-answer {
-  background: var(--c-surface-2);
-  border-left: 3px solid var(--c-primary);
-  border-radius: 0 var(--r-md) var(--r-md) 0;
-  padding: var(--sp-4) var(--sp-5);
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-left: 4px solid var(--c-primary);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
   margin: var(--sp-4) 0;
 }
-.qa-answer h4 { margin: 0 0 var(--sp-2); }
-.qa-answer p { margin: var(--sp-2) 0 0; line-height: 1.95; font-size: 14.5px; max-width: var(--read-max); }
+.qa-answer h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: 13px;
+  letter-spacing: .06em;
+  color: var(--c-primary);
+}
+.qa-answer p { margin: var(--sp-2) 0 0; line-height: 1.95; font-size: 15.5px; max-width: var(--read-max); }
 .qa-ask { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
 .qa-ask input { flex: 1 1 320px; min-width: 0; }
 
@@ -807,7 +902,7 @@ details.fold .fold-body > :first-child { margin-top: 0; }
 
 /* 窄窗：导航允许横向滚动而不是换行挤成两排（挤压会破坏 fixed 高度） */
 @media (max-width: 900px) {
-  :root { --nav-h: 56px; }
+  :root { --nav-h: 58px; }
   .topbar-inner { gap: var(--sp-2); padding: 0 var(--sp-3); }
   .brand .subtitle { display: none; }
   .brand h1 { font-size: 15px; }
@@ -824,7 +919,7 @@ details.fold .fold-body > :first-child { margin-top: 0; }
     justify-content: flex-start;
   }
   .mainnav::-webkit-scrollbar { display: none; }
-  .mainnav a { padding: 6px 10px; font-size: 13.5px; }
+  .mainnav a { padding: 7px 11px; font-size: 14px; }
   .nav-sep { display: none; }
   .wrap { padding-top: var(--sp-5); gap: var(--sp-4); }
   .hero { padding: var(--sp-5) var(--sp-4); }
@@ -890,27 +985,33 @@ details.fold .fold-body > :first-child { margin-top: 0; }
   );
 }
 
-/* 导航底部用一条收敛的色带（只保留主色系，避免导航过花） */
+/* 导航底部收口：主色系渐变（与首页藏蓝青一致），高度 3px 让分界更清楚。
+   经幡五色不铺满整条（会显得花），只在**当前栏目**下方出现一小段（见下一条）。 */
 .topbar { border-bottom: 0; }
 .topbar::after {
   content: "";
   display: block;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(90deg,
-    var(--c-primary) 0%, var(--c-primary-light) 38%,
-    var(--c-accent-bright) 62%, var(--c-accent) 100%);
-  opacity: .85;
+    var(--c-primary-ink) 0%, var(--c-primary) 24%,
+    var(--c-primary-light) 54%, var(--c-accent-bright) 78%, var(--c-accent) 100%);
+  opacity: .9;
 }
-.topbar-inner { height: calc(var(--nav-h) - 2px); }
+.topbar-inner { height: calc(var(--nav-h) - 3px); }
 
-/* 当前栏目用一条短色带标记（比整块底色更克制） */
+/* 当前栏目下方的**经幡短色带**（22px × 3px）：
+   复用首页 .flagline 的经幡五色语言，但去掉白色那一段——导航是浅色底，
+   白色段会看不见。它是"我在哪一栏"的第二个视觉信号（第一个是藏蓝青实心胶囊）。 */
 .mainnav a.active::after {
   content: "";
   position: absolute;
-  left: 12px; right: 12px; bottom: -2px;
-  height: 2px;
-  background: var(--c-primary);
+  left: 50%; bottom: -6px;
+  transform: translateX(-50%);
+  width: 22px; height: 3px;
   border-radius: 2px;
+  background: linear-gradient(90deg,
+    var(--flag-blue) 0 25%, var(--flag-red) 25% 50%,
+    var(--flag-green) 50% 75%, var(--flag-yellow) 75% 100%);
 }
 
 /* —— Hero：首屏视觉展示区（插画 + 蒙版 + 文案 + 关键数字） —— */
@@ -1233,4 +1334,101 @@ details.fold .fold-body > :first-child { margin-top: 0; }
   .rank-row { grid-template-columns: 28px 1fr auto; gap: var(--sp-3); }
   .rank-row .rs { display: none; }
   .scenic-grid { grid-template-columns: 1fr; }
+}
+
+/* =============================================================================
+   内页页头（Page Hero）——把首页 Hero 的设计语言收敛后带到其他页面
+   -----------------------------------------------------------------------------
+   首页首屏是一整块"藏蓝渐变 + 自绘雪域插画 + 蒙版 + 经幡色带"的视觉区；
+   其他页面此前是"内容直接落在白卡片上"，从首页点进来会像换了一个站点。
+   这里复用同一套配方（同样的深藏蓝渐变、同样的蒙版手法、同样的 .hero-eyebrow
+   徽标与 .flagline 色带），只把标题与正文收小一档，作为**内页的页头**：
+     · 与首页同源的藏地色彩与插画（沿用既有 SVG 素材，不新增任何图片）；
+     · 统一的"栏目名"徽标 + 一句话说明 + 覆盖范围；
+     · 底部经幡色带（全站视觉签名，与首页同一位置）。
+   结构（由各页面模板提供）：
+     <section class="page-hero" data-art-box>
+       <img class="page-hero-art" src="…/scene-*.svg" data-art alt="" aria-hidden="true">
+       <div class="page-hero-veil"></div>
+       <div class="page-hero-inner">
+         <p class="hero-eyebrow">栏目名</p>
+         <h2>标题</h2>
+         <p class="page-hero-lead">一句话说明</p>
+         <p class="page-hero-meta">覆盖范围</p>
+       </div>
+       <div class="flagline"></div>
+     </section>
+   插画缺失时由 common.js 的 _initArtFallback 加 .art-missing，自动退化为纯渐变
+   （与首页 Hero 的降级行为完全一致）。
+   ============================================================================= */
+.page-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  background: linear-gradient(160deg, #062338 0%, #0d3f5e 46%, #1d6a8c 100%);
+  box-shadow: var(--shadow-md);
+  color: #fff;
+}
+.page-hero-art {
+  position: absolute;
+  top: 0; right: 0;
+  height: 100%;
+  width: min(56%, 640px);
+  object-fit: cover;
+  object-position: right center;
+  opacity: .55;
+  filter: saturate(.95);
+  /* 左侧淡出：让插画与深色底自然衔接。
+     不支持 mask 的浏览器只是一条硬边，不影响文字可读性。 */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 34%, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 34%, #000 100%);
+}
+.page-hero.art-missing .page-hero-art { display: none; }
+.page-hero-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(100deg, rgba(6, 30, 45, .86) 0%, rgba(8, 45, 66, .68) 46%, rgba(10, 60, 84, .30) 100%),
+    linear-gradient(180deg, rgba(6, 30, 45, .28) 0%, rgba(6, 30, 45, 0) 40%, rgba(6, 30, 45, .34) 100%);
+}
+.page-hero-inner {
+  position: relative;
+  padding: var(--sp-7) var(--sp-7) var(--sp-6);
+  max-width: 62ch;
+}
+.page-hero h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: .3px;
+  color: #fff;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, .32);
+}
+.page-hero .page-hero-lead {
+  margin: 0 0 var(--sp-2);
+  font-size: 15.5px;
+  line-height: 1.85;
+  color: #e2eef2;
+}
+.page-hero .page-hero-meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: #a9c8d4;
+}
+/* 底部经幡色带：与首页 Hero 同一位置、同一道五色渐变 */
+.page-hero .flagline { position: absolute; left: 0; right: 0; bottom: 0; opacity: .9; }
+
+@media (max-width: 900px) {
+  .page-hero { border-radius: var(--r-lg); }
+  .page-hero-inner { padding: var(--sp-6) var(--sp-5) var(--sp-5); }
+  .page-hero h2 { font-size: 24px; }
+  .page-hero .page-hero-lead { font-size: 14.5px; }
+  .page-hero-art { width: 68%; opacity: .38; }
+}
+@media (max-width: 620px) {
+  .page-hero-inner { padding: var(--sp-5) var(--sp-4) var(--sp-4); }
+  .page-hero h2 { font-size: 20px; }
+  .page-hero .page-hero-lead { font-size: 14px; }
+  .page-hero-art { width: 84%; opacity: .26; }
 }

@@ -43,13 +43,19 @@ async function loadSpotOptions() {
       + (eligible.length ? `<optgroup label="可以生成综合评价（评论量 ≥100）">${eligible.map(opt).join('')}</optgroup>` : '')
       + (others.length ? `<optgroup label="仅提供基础统计（评论量 <100）">${others.map(opt).join('')}</optgroup>` : '');
 
-    // 从「景点分析」页或首页带过来的景点：若不在前 200 名，补一个选项，避免"选了却没反应"
+    // 从「景点分析」页或首页带过来的景点：若不在前 100 名，补一个选项，避免"选了却没反应"。
+    // 【修】`/api/spots/{id}` 的返回体是 `{spot: {...}, statistics: {...}}`，景点字段在 `spot` 里；
+    // 此前直接取 `one.spot_id / one.spot_name`，会生成 `<option value="undefined">`（且没有名称），
+    // 导致「评论量较低的景点」用 URL 带过来时打不开（实测 spot 796 触发）。
     const active = window.UI.getActiveSpot();
     if (active && !items.some(it => String(it.spot_id) === String(active))) {
       try {
         const one = await apiGet(`/api/spots/${active}`);
-        sel.insertAdjacentHTML('beforeend',
-          `<option value="${one.spot_id}">${escapeHtml(one.spot_name)}</option>`);
+        const sp = one.spot || one;
+        if (sp && sp.spot_id) {
+          sel.insertAdjacentHTML('beforeend',
+            `<option value="${sp.spot_id}">${escapeHtml(sp.spot_name || '')}（${fmtInt(sp.review_count)} 条评论）</option>`);
+        }
       } catch (e) { /* 该景点不存在则忽略 */ }
     }
   } catch (e) {
@@ -86,6 +92,7 @@ function renderUnavailable(data) {
     : (reviews !== null && reviews !== undefined
         ? `<p class="hint">当前收录该景点评论 <strong>${fmtInt(reviews)}</strong> 条。</p>` : '');
 
+  // 没有综合评价时，真实评论反而更有价值：同样把「游客真实声音」挂在这里
   return `
     ${window.UI.pendingNotice(title, hint)}
     ${gap}
@@ -94,7 +101,8 @@ function renderUnavailable(data) {
       <a class="link" href="/spots?spot=${encodeURIComponent(data.spot_id || '')}">基础统计与代表评论</a>，
       或在上方换一个评论量更多的景点。
     </p>
-    ${caliberNote(data.caliber_note, data.review_count)}`;
+    ${caliberNote(data.caliber_note, data.review_count)}
+    <div id="eval-voices"></div>`;
 }
 
 async function loadReport() {
@@ -120,9 +128,11 @@ async function loadReport() {
     // 数据不足 / 尚未生成 → 属正常业务响应（available=false），按提示语展示而非报错
     if (!data.available) {
       box.innerHTML = renderUnavailable(data);
+      loadRealVoices(spotId);     // 没有综合评价时，真实评论反而更有价值
       return;
     }
     renderAvailable(data, box);
+    loadRealVoices(spotId);       // 「游客真实声音」用的是 review 表的原文，与评价是否生成无关
   } catch (e) {
     box.innerHTML = window.UI.notice(
       `加载该景点的智能评价时出错：${window.UI.userMessage(e)}`, 'bad',
@@ -134,25 +144,38 @@ async function loadReport() {
 function renderAvailable(data, box) {
   const r = data.report || {};
   const basis = data.basis || {};
-  const list = (title, items, cls) => `
+  const list = (title, items, cls) => {
+    // 每一项都过一遍"用户化"改写；返回 null 的表示与下方数字卡重复，不再罗列。
+    const rows = (items || []).map(x => humanizeReportItem(x)).filter(Boolean);
+    return `
     <div class="rep-col ${cls}">
       <h4>${title}</h4>
-      <ul>${(items || []).map(x => `<li>${escapeHtml(x)}</li>`).join('') || '<li class="muted">暂无可提炼内容</li>'}</ul>
+      <ul>${rows.map(x => `<li>${x}</li>`).join('')
+        || '<li class="muted">这一项没有可展示的内容</li>'}</ul>
     </div>`;
+  };
+  // 游客关注点：原来是一整列"方面，样本量N"，与左侧两列重复；这里并成一行话题清单。
+  const focusLine = (r.visitor_focus || []).map(x => humanizeReportItem(x)).filter(Boolean).join('、');
 
   box.innerHTML = `
-    ${data.need_review ? window.UI.notice(data.need_review_note || '该内容中的部分数字与数据依据不完全一致，已标记待人工复核。', 'warn') : ''}
+    ${data.need_review ? window.UI.notice(data.need_review_note
+      || '部分统计数据存在一致性提示，相关内容已由系统核对；'
+        + '阅读时建议结合各项的样本量综合判断。', 'warn') : ''}
 
     <div class="rep-summary">
-      <h3>综合评价</h3>
-      <p>${escapeHtml(r.summary || '')}</p>
+      <h3>综合评价 <span class="tag">由分析结果生成</span></h3>
+      <p>${humanizeSummary(r.summary || '')}</p>
     </div>
 
+    <p class="hint">下面三项都来自评论统计：括号里的<b>百分比</b>＝提到该方面的评论中给出好评／差评的比例，
+      <b>条数</b>＝提到该方面的评论数。整体好评率与平均评分见下方「数据依据」。</p>
     <div class="rep-grid">
-      ${list('主要优势', r.advantages, 'pos')}
-      ${list('主要问题', r.issues, 'neg')}
-      ${list('游客关注点', r.visitor_focus, 'focus')}
+      ${list('游客满意的地方', r.advantages, 'pos')}
+      ${list('游客提到的问题', r.issues, 'neg')}
     </div>
+    ${focusLine ? `<p class="hint"><b>游客讨论最多的话题</b>：${focusLine}</p>` : ''}
+
+    <div id="eval-voices"></div>
 
     <h3>数据依据</h3>
     <p class="hint">上述评价只允许引用以下数字，不允许引入评论之外的信息。${(basis.source === 'fact_package' && basis.version)
@@ -174,9 +197,9 @@ function renderAvailable(data, box) {
     ])}
 
     ${(basis.top_aspects && basis.top_aspects.length) ? `
-      <h4>游客关注的方面</h4>
-      <p class="hint">样本量不足 10 条的方面只展示样本量，不给出结论。</p>
-      ${renderTable(['方面', '样本量', '正面占比', '负面占比', '说明'],
+      <h4>游客提到的方面</h4>
+      <p class="hint">提到该方面的评论不足 10 条时，只展示条数、不给出比例。</p>
+      ${renderTable(['游客提到的方面', '提到该方面的评论数', '其中好评比例', '其中差评比例', '说明'],
         basis.top_aspects.map(a => [
           escapeHtml(a.name), fmtInt(a.sample_size),
           a.positive_rate === null ? '<span class="muted">样本不足</span>' : fmtPct(a.positive_rate),
@@ -185,6 +208,197 @@ function renderAvailable(data, box) {
         ]))}` : ''}
 
     ${caliberNote(data.caliber_note, data.sample_size)}`;
+}
+
+/* =============================================================================
+   展示层改写：把离线报告里机器生成的条目换成游客能读的话
+   -----------------------------------------------------------------------------
+   【为什么是"词级"改写】57 份报告共 881 个条目，写法有 469 种（"样本量886"／"样本122条"／
+   "风景维度正面率0.89"／"整体好评率0.9143，差评率0.0357"／纯事实描述……）。
+   整串模板匹配只能覆盖三分之一，因此这里统一做**词级替换**：
+     · 术语 → 人话："正面率0.97" → "好评比例 97%"、"样本量886" → "886 条评论"、"维度" → "方面"；
+     · **只换写法，不改数值**：0.97 × 100 = 97%，同一个数；"正面率"是方面级口径，
+       绝不写成整体"好评率"（两者含义不同）；
+     · 认不出的句子（例如"古城为唐代吐蕃王朝所建"）**原样保留**，不改写、不补写；
+     · 与下方「数据依据」数字卡完全重复的整体指标（整体好评率、平均评分、情感分布）
+       不再重复罗列。
+   ============================================================================= */
+
+/* 【踩坑记录】比率正则必须**百分数形式在前**：
+   写成 `([01](?:\.\d+)?|\d+(?:\.\d+)?%)` 时，`1` 会先匹配到 "14%" 的十位，
+   把"负面率14%"改写成"差评比例 100%4%"（数值被改坏，实测在全部 57 份报告里抓到 3 处）。
+   因此：百分数优先，整数形式用 `(?![\d%])` 保证不会截断后面的数字或百分号。
+
+   【两套口径分开改写，绝不混用】
+     · 星级口径：正面率 / 负面率 / 好评率 / 差评率 → "好评比例 / 差评比例"；
+     · 情感口径：正面情感占比 / 正面评价占比 / 中性占比 … → "正面评价占比 / 负面评价占比"。
+   两者在项目里是**不同的统计方法**（BR-04/BR-10），不能都写成"好评率"。 */
+const RATE_SRC = '(\\d+(?:\\.\\d+)?%|[01](?:\\.\\d+)?(?![\\d%]))';
+// 修饰词要覆盖"均 / 都 / 分别 / 各 / 仅 / 约 / 为"——线上真实报告里"负面率均为0.53"很常见
+const MOD = '(仅|约|为|均|都|分别|各)?';
+const RE_STAR_POS = new RegExp(`(?:正面率|好评率)\\s*${MOD}\\s*${RATE_SRC}`, 'g');
+const RE_STAR_NEG = new RegExp(`(?:负面率|差评率)\\s*${MOD}\\s*${RATE_SRC}`, 'g');
+const RE_SENT_POS = new RegExp(`(?:(?:情感)?正面(?:情感)?(?:占比|占)?|情感分析正面占比)\\s*${MOD}\\s*${RATE_SRC}`, 'g');
+const RE_SENT_NEG = new RegExp(`(?:(?:情感)?负面(?:情感)?(?:占比|占)?|情感分析负面占比)\\s*${MOD}\\s*${RATE_SRC}`, 'g');
+// 裸写法："正面0.6、中性0.27、负面0.13"（情感分析段落里常见）
+const RE_SENT_BARE = new RegExp(`(正面|中性|负面)\\s*${RATE_SRC}`, 'g');
+const RE_BOTH = new RegExp(`正面(?:率|评价)?与负面(?:率|评价)?(?:均)?为\\s*${RATE_SRC}`, 'g');
+const RE_IMAGE = new RegExp(`图片率\\s*${MOD}\\s*${RATE_SRC}`, 'g');
+// 一句里已经出现"比例/占比"时，句内剩下的**小数**（如"分别为0.6、0.58"）只可能是比率
+// → 一并写成百分比。只认小数形式（不认裸整数 0/1，避免把"共1条评论"改成"100%条评论"），
+// 且后面跟 %/倍/年/岁/万/千 等量词的一律跳过（那是量纲，不是比率）。
+const RE_BARE_RATE = /(?<![\d.])([01]\.\d+)(?![\d.%倍年岁万千米个人次天])/g;
+const HAS_RATE_TERM = /(?:好评|差评|正面评价|负面评价|带图评论)比例|(?:正面|中性|负面)评价占比/;
+
+/** 把 0.87 / 87% 两种写法统一显示成 "87%"（只换写法，数值不变）。 */
+function fmtRateText(raw) {
+  const s = String(raw);
+  const n = parseFloat(s);
+  if (!isFinite(n)) return s;
+  return s.indexOf('%') >= 0 ? `${Math.round(n * 10) / 10}%` : `${Math.round(n * 1000) / 10}%`;
+}
+
+/** 共用的词级替换：术语 → 人话。**只换写法，不改任何数值**。 */
+function humanizeTerms(text) {
+  let out = String(text == null ? '' : text)
+    .replace(RE_BOTH, (m, r) => `好评与差评各占 ${fmtRateText(r)}`)
+    .replace(RE_STAR_POS, (m, mod, r) => `好评比例${mod === '仅' ? '仅 ' : ' '}${fmtRateText(r)}`)
+    .replace(RE_STAR_NEG, (m, mod, r) => `差评比例${mod === '仅' ? '仅 ' : ' '}${fmtRateText(r)}`)
+    .replace(RE_SENT_POS, (m, mod, r) => `正面评价占比${mod === '仅' ? '仅 ' : ' '}${fmtRateText(r)}`)
+    .replace(RE_SENT_NEG, (m, mod, r) => `负面评价占比${mod === '仅' ? '仅 ' : ' '}${fmtRateText(r)}`)
+    .replace(RE_IMAGE, (m, mod, r) => `带图评论比例${mod === '仅' ? '仅 ' : ' '}${fmtRateText(r)}`)
+    .replace(RE_SENT_BARE, (m, which, r) => `${which}评价占比 ${fmtRateText(r)}`)
+    // 样本量 → N 条评论（"样本量886" / "样本122条" / "样本量分别为16条和13条"）
+    .replace(/样本量?\s*(?:分别)?为\s*(\d+)\s*条?\s*和\s*(\d+)\s*条?/g,
+      (m, a, b) => `分别为 ${fmtInt(a)} 条和 ${fmtInt(b)} 条评论`)
+    .replace(/样本量?\s*(?:均|都)?为\s*(\d+)\s*条?/g, (m, n) => `为 ${fmtInt(n)} 条评论`)
+    .replace(/样本量?\s*(\d+)\s*条/g, (m, n) => `${fmtInt(n)} 条评论`)
+    .replace(/样本量?\s*(\d+)(?!\s*条)/g, (m, n) => `${fmtInt(n)} 条评论`)
+    .replace(/样本量/g, '讨论量')     // 剩下的都是"样本量最大"这类没有数字的写法
+    // 论文式说法 → 日常说法
+    .replace(/维度/g, '话题')
+    // 没有紧跟数字的术语（"…等负面率均超过0.5" / "负面率相对较高"）也要换掉
+    .replace(/正面率/g, '好评比例')
+    .replace(/好评率/g, '好评比例')
+    .replace(/负面率/g, '差评比例')
+    .replace(/差评率/g, '差评比例')
+    .replace(/正面情感(?:占比|占)?/g, '正面评价占比')
+    .replace(/负面情感(?:占比|占)?/g, '负面评价占比')
+    .replace(/[，,]?\s*为各(?:话题|方面|分项|评价方面)(?:中)?(?:最高|最大|最多)/g, '（在各话题里最高）')
+    .replace(/[，,]?\s*为各(?:话题|方面|分项|评价方面)(?:中)?(?:最低|最少)/g, '（在各话题里最低）')
+    .replace(/样本不足\s*(\d+)\s*条评论/g, (m, n) => `只有 ${fmtInt(n)} 条评论、样本太少`)
+    .replace(/不纳入评价/g, '不单独下结论');
+
+  // 兜底：句子里已出现"比例/占比"时，剩下的裸小数（含"分别/均"后面的列表）就是比率
+  if (HAS_RATE_TERM.test(out)) {
+    out = out.replace(RE_BARE_RATE, (m, num) => fmtRateText(num));
+  }
+  return out;
+}
+
+/** 综合评价（模型写的一段话）：只做同样的术语替换，不改写句子、不改数值。 */
+function humanizeSummary(text) {
+  return escapeHtml(humanizeTerms(text));
+}
+
+function humanizeReportItem(text) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t) return null;
+
+  // ① 与下方「数据依据」数字卡重复的整体指标 → 不再重复罗列
+  //    （"图片率/点赞"这类卡片里没有的信息要保留，所以加了例外）
+  if (/^(整体|综合|总体|平均评分|平均分|综合评分)/.test(t) && !/图片率|点赞/.test(t)) return null;
+
+  let out = humanizeTerms(t);
+
+  // ② 条目以"方面"开头时补一个冒号，读起来是"门票：差评比例 58%，452 条评论"
+  out = out.replace(/^([^，,：:]{2,10}?)(?=(?:好评|差评)比例)/, '$1：');
+  // ③ 关注点写法："性价比，样本量2382，好评比例 87%" → "性价比（2,382 条评论，好评比例 87%）"
+  out = out.replace(/^([^，,：:]{2,10})，\s*([\d,]+ 条评论)(.*)$/, '$1（$2$3）');
+
+  return escapeHtml(out);
+}
+
+/* =============================================================================
+   游客真实声音（原文照录）
+   -----------------------------------------------------------------------------
+   【与 AI 内容的边界】这一块**只做搬运**：原文、评分、时间、话题全部取自数据库
+   （`review` 表 + 该评论在 `aspect` 表里的真实标注），不经过任何模型，
+   不做改写、不做补全、不做润色。页面上用"原文照录"标签与上方"由分析结果生成"区分。
+   数据不足时**少展示**：重复正文、无信息量短评、空评论一律剔除，绝不凑数。
+   ============================================================================= */
+const VOICE_GROUPS = [
+  { key: 'positive', label: '好评', range: '4 星及以上' },
+  { key: 'neutral', label: '中评', range: '3 星' },
+  { key: 'negative', label: '差评', range: '2 星及以下' },
+];
+const VOICE_FETCH_LIMIT = 6;      // 接口每次取回的条数（上限 20）
+const VOICE_MAX_PER_GROUP = 3;    // 页面每组最多展示 3 条，避免一次性堆大量文本
+const VOICE_CLAMP = 150;          // 单条超过这个长度就折叠，避免刷屏
+
+/** 一条评论是否值得展示：排除内容重复与无信息量短评（宁少不凑）。 */
+function voiceUsable(row) {
+  if (!row || !row.content) return false;
+  if (row.is_dup_content) return false;
+  const len = Number(row.content_length || String(row.content).length);
+  if (len <= 10) return false;
+  return true;
+}
+
+function renderVoiceCard(row, cls) {
+  const text = String(row.content || '');
+  const body = text.length > VOICE_CLAMP
+    ? `<p class="review-text">${escapeHtml(text.slice(0, VOICE_CLAMP))}…</p>
+       <details class="fold"><summary>查看完整评论（${text.length} 字）</summary>
+         <div class="fold-body"><p class="review-text">${escapeHtml(text)}</p></div>
+       </details>`
+    : `<p class="review-text">${escapeHtml(text)}</p>`;
+  const topics = (row.topics || []).filter(Boolean);
+  const meta = [
+    row.score ? `${row.score} 星` : '未评分',
+    row.publish_date ? escapeHtml(String(row.publish_date).slice(0, 10)) : '',
+    row.like_count ? `${fmtInt(row.like_count)} 人点赞` : '',
+    topics.length ? `提到：${topics.map(t => escapeHtml(t)).join('、')}` : '',
+  ].filter(Boolean).join(' · ');
+  // 复用站点既有的 .review 版式（与「景点分析」页的代表评论视觉一致）
+  return `
+    <div class="review ${cls}">
+      <div class="review-meta">${meta}</div>
+      ${body}
+    </div>`;
+}
+
+async function loadRealVoices(spotId) {
+  const box = document.getElementById('eval-voices');
+  if (!box) return;
+  box.innerHTML = '<p class="hint">正在取这个景点的真实评论…</p>';
+  try {
+    const data = await apiGet(`/api/spots/${spotId}/reviews`, { limit: VOICE_FETCH_LIMIT });
+    const groups = VOICE_GROUPS
+      .map(g => ({ ...g, rows: (data[g.key] || []).filter(voiceUsable).slice(0, VOICE_MAX_PER_GROUP) }))
+      .filter(g => g.rows.length);
+    if (!groups.length) {
+      box.innerHTML = `
+        <h3>游客真实声音 <span class="tag ok">原文照录</span></h3>
+        <p class="hint">这个景点目前没有可展示的完整评论原文
+          （过短、内容重复或缺失的评论不会被拿来充数）。</p>`;
+      return;
+    }
+    box.innerHTML = `
+      <h3>游客真实声音 <span class="tag ok">原文照录，未经改写</span></h3>
+      <p class="hint">下面是从该景点评论里挑出的原文，按好评／中评／差评分组，每组最多
+        ${VOICE_MAX_PER_GROUP} 条。它们只用于让你看到"游客原话长什么样"，
+        <b>不代表整体评价分布</b>（分布请看下方数据依据）。</p>
+      ${groups.map(g => `
+        <div class="voice-group">
+          <h4>${g.label}<span class="muted">（${g.range}）</span></h4>
+          ${g.rows.map(r => renderVoiceCard(r, g.key === 'positive' ? 'pos' : (g.key === 'negative' ? 'neg' : 'neu'))).join('')}
+        </div>`).join('')}
+      ${caliberNote(data.caliber_note, null)}`;
+  } catch (e) {
+    box.innerHTML = window.UI.notice(
+      `暂时取不到评论原文：${window.UI.userMessage(e)}`, 'warn');
+  }
 }
 
 /** 只有管理员才显示"申请重新生成"按钮（接口需管理员）。

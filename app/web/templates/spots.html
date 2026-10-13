@@ -1,10 +1,35 @@
 {% extends "base.html" %}
 {% block title %}景点分析 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}M2 景点分析：排行榜、景点检索、情感／方面／主题／代表评论{% endblock %}
+{% block subtitle %}景点分析：排行榜、景点检索、情感分布、关注方面、主题与代表评论{% endblock %}
+
+{#
+  内页页头（.page-hero）：与首页 Hero 同源的藏蓝渐变 + 自绘插画 + 经幡色带。
+  本页插画取"雅鲁藏布大峡谷"（既有素材），呼应"逐层深入看一个景点"的阅读动作。
+#}
+{% block pagehead %}
+<section class="page-hero" data-art-box>
+  <img class="page-hero-art" src="{{ url_for('static', filename='img/scene-canyon.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="page-hero-veil" aria-hidden="true"></div>
+  <div class="page-hero-inner">
+    <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
+    <h2>景点分析</h2>
+    <p class="page-hero-lead">
+      按评论量、评分、好评率排行，检索任意景点，查看它的情感分布、关注方面、
+      时间趋势与代表性评论原文。
+    </p>
+    <p class="page-hero-meta">全部结论均来自真实评论数据</p>
+  </div>
+  <div class="flagline" aria-hidden="true"></div>
+</section>
+{% endblock %}
 
 {% block content %}
 <section class="card">
-  <h2>一、景点排行</h2>
+  <div class="section-title">
+    <h2>一、景点排行</h2>
+    <span class="st-sub">按评论量／评分／好评率排序</span>
+  </div>
   <p class="hint">
     排序依据：
     <select id="rank-by">
@@ -25,7 +50,10 @@
 </section>
 
 <section class="card">
-  <h2>二、景点检索</h2>
+  <div class="section-title">
+    <h2>二、景点检索</h2>
+    <span class="st-sub">按名称关键字查找</span>
+  </div>
   <p class="hint">
     <input id="kw" type="text" placeholder="输入景点名称关键字，如：布达拉宫" />
     <button id="btn-search" type="button">搜索</button>
@@ -36,17 +64,20 @@
 </section>
 
 <section class="card" id="detail-card" style="display:none">
-  <h2>三、景点详情：<span id="detail-name"></span></h2>
+  <div class="section-title">
+    <h2>三、景点详情：<span id="detail-name"></span></h2>
+    <span class="st-sub">基础统计、情感、方面、主题与代表评论</span>
+  </div>
   <div id="detail-body"></div>
 
   <h3>情感分布</h3>
   <p class="hint">
-    判定口径：
+    查看方式：
     <select id="sentiment-method">
-      <option value="semantic">深度语义判定（对评论正文逐条做语义分析）</option>
-      <option value="baseline">统计基线判定（覆盖全部评论的快速判定）</option>
+      <option value="semantic">按评论内容判读（对评论正文逐条做语义分析）</option>
+      <option value="baseline">按星级统计（覆盖全部评论的快速统计）</option>
     </select>
-    　两种口径的结论不可混用，因此分开展示。
+    　两套结果各算各的、不能混用，因此分开展示。
   </p>
   <div id="chart-sentiment" class="chart chart-wide"></div>
   <div id="sentiment-note"></div>
@@ -70,5 +101,11 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  /* 由 URL 带入的景点（`/spots?spot=<id>`）：页面脚本加载完列表后直接展开它的详情。
+     为什么需要：详情区默认是隐藏的，若不带这个初值，从别处跳过来的用户会看到
+     "页面打开了但没有他刚才那个景点"。 */
+  window.__INITIAL_SPOT__ = {{ initial_spot | tojson }};
+</script>
 <script src="{{ url_for('static', filename='js/spots.js') }}"></script>
 {% endblock %}

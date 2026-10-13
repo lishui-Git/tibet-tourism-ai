@@ -2,13 +2,30 @@
 {% block title %}管理员登录 · 西藏旅游景点智能评价与分析系统{% endblock %}
 {% block subtitle %}管理端功能登录{% endblock %}
 
+{# 内页页头：与首页 Hero 同源的视觉语言（本页为管理端入口，故说明文字更简短） #}
+{% block pagehead %}
+<section class="page-hero" data-art-box>
+  <img class="page-hero-art" src="{{ url_for('static', filename='img/scene-potala.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="page-hero-veil" aria-hidden="true"></div>
+  <div class="page-hero-inner">
+    <p class="hero-eyebrow">管理端</p>
+    <h2>管理员登录</h2>
+    <p class="page-hero-lead">
+      管理端提供任务状态、系统日志与数据口径查看。公开的分析页面无需登录。
+    </p>
+  </div>
+  <div class="flagline" aria-hidden="true"></div>
+</section>
+{% endblock %}
+
 {% block content %}
 <div class="login-shell">
   <section class="card login-card">
-    <h2>管理员登录</h2>
-    <p class="hint" style="text-align:center">
-      管理端提供任务状态、系统日志与数据口径查看。公开的分析页面无需登录。
-    </p>
+    <div class="section-title">
+      <h2>登录</h2>
+      <span class="st-sub">管理员账号</span>
+    </div>
     <div class="login-form">
       <label>用户名
         <input id="login-user" type="text" autocomplete="username" placeholder="管理员用户名" />

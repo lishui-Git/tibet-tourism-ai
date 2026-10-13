@@ -143,12 +143,24 @@ function fmtNum(v, digits) {
   return Number(v).toFixed(digits === undefined ? 2 : digits);
 }
 
-/** 口径说明块（BR-10：受口径影响的接口都要显示说明与样本量）。 */
-function caliberNote(text, sampleSize) {
+/** 口径说明块（BR-10：受口径影响的接口都要显示说明与样本量）。
+ *
+ * 【第三个参数 sampleText 的用途】景点对比页要同时给出**两个**样本量（A / B），
+ * 其值天然是一段文本而不是单个数字。若把它交给 sampleSize 走 `fmtInt`，
+ * `Number("3,965 / 3,156")` 会得到 NaN，页面就会出现「有效样本量：NaN」——
+ * 这是实测踩到过的缺陷。因此约定：**sampleText 必须已经是格式化好的字符串**，
+ * 由调用方用 fmtInt 逐个数字拼好；不传时行为与以前完全一致。
+ * 两个参数都为空时**不显示样本量这一句**（宁可不写，也不写 NaN 或 0 顶替）。
+ */
+function caliberNote(text, sampleSize, sampleText) {
   if (!text) return '';
-  const sample = (sampleSize === null || sampleSize === undefined)
-    ? '' : `　有效样本量：<strong>${fmtInt(sampleSize)}</strong>`;
-  return `<div class="caliber">口径说明：${escapeHtml(text)}${sample}</div>`;
+  let sample = '';
+  if (sampleText !== null && sampleText !== undefined && sampleText !== '') {
+    sample = `　有效样本量：<strong>${escapeHtml(sampleText)}</strong>`;
+  } else if (sampleSize !== null && sampleSize !== undefined) {
+    sample = `　有效样本量：<strong>${fmtInt(sampleSize)}</strong>`;
+  }
+  return `<div class="caliber">数据说明：${escapeHtml(text)}${sample}</div>`;
 }
 
 /** 数据表：rows 为二维数组，head 为表头。 */
@@ -221,14 +233,23 @@ function _initBackToTop() {
    页面级工具（挂到 window.UI，供各页面脚本复用，避免每页重复实现）
    -------------------------------------------------------------------------- */
 window.UI = {
-  /** 统计卡片组：items = [{label, value, sub}] */
+  /** 统计卡片组：items = [{label, value, sub}]
+   *
+   * 【2026-10 内页视觉同步】返回的是**带网格容器的整块 HTML**（.stat-grid > .stat × N），
+   * 不再是零散的卡片。
+   * 原因：此前只返回 .stat 系列、容器由各页自己套；实测 6 个调用点里只有总览页套了
+   * .stat-grid，其余（对比页／评价页／问答页／任务页／景点详情）都退化成"整行堆叠"，
+   * 与首页一行多列的重点数字块完全不像一套设计。容器在这里统一给，6 处一起对齐。
+   * 约定：调用方**不要**再在外面套 .stat-grid（否则会形成嵌套网格）。
+   * 纯展示层改动：label/value/sub 的含义、接口字段与业务逻辑都不变。 */
   statCards(items) {
-    return items.map(it => `
+    const cells = items.map(it => `
       <div class="stat">
         <span class="stat-label">${escapeHtml(it.label)}</span>
         <span class="stat-value">${it.value}</span>
         ${it.sub ? `<span class="stat-sub">${escapeHtml(it.sub)}</span>` : ''}
       </div>`).join('');
+    return `<div class="stat-grid">${cells}</div>`;
   },
 
   /** 加载失败或"无数据"的统一提示块 */

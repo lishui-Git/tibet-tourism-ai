@@ -22,17 +22,21 @@
         <h1>西藏旅游景点智能评价与分析系统</h1>
         <p class="subtitle">{% block subtitle %}基于游客评论的离线智能分析平台{% endblock %}</p>
       </div>
+      {# 当前栏目高亮：active_nav 由 app/web/__init__.py 的模板上下文注入，
+         样式（.mainnav a.active / a.active::after）一直存在，但此前模板没有把它接上，
+         因此任何页面都不会高亮——从首页进到内页时缺少"我在哪一栏"的提示。
+         这里只是把已有的上下文与已有的样式接通，不新增任何样式或逻辑。 #}
       <nav class="mainnav" aria-label="主导航">
-        <a href="{{ url_for('pages.index') }}" data-nav="home">首页</a>
-        <a href="{{ url_for('pages.overview_page') }}" data-nav="overview">数据总览</a>
-        <a href="{{ url_for('pages.spots_page') }}" data-nav="spots">景点分析</a>
-        <a href="{{ url_for('pages.smart_page') }}" data-nav="smart">智能分析</a>
-        <a href="{{ url_for('pages.compare_page') }}" data-nav="compare">景点对比</a>
+        <a href="{{ url_for('pages.index') }}" data-nav="home"{% if active_nav == 'home' %} class="active" aria-current="page"{% endif %}>首页</a>
+        <a href="{{ url_for('pages.overview_page') }}" data-nav="overview"{% if active_nav == 'overview' %} class="active" aria-current="page"{% endif %}>数据总览</a>
+        <a href="{{ url_for('pages.spots_page') }}" data-nav="spots"{% if active_nav == 'spots' %} class="active" aria-current="page"{% endif %}>景点分析</a>
+        <a href="{{ url_for('pages.smart_page') }}" data-nav="smart"{% if active_nav == 'smart' %} class="active" aria-current="page"{% endif %}>智能分析</a>
+        <a href="{{ url_for('pages.compare_page') }}" data-nav="compare"{% if active_nav == 'compare' %} class="active" aria-current="page"{% endif %}>景点对比</a>
         <span class="nav-sep" aria-hidden="true"></span>
         {% if current_user %}
-        <a href="{{ url_for('pages.admin_page') }}" data-nav="admin">管理后台</a>
+        <a href="{{ url_for('pages.admin_page') }}" data-nav="admin"{% if active_nav == 'admin' %} class="active" aria-current="page"{% endif %}>管理后台</a>
         {% else %}
-        <a href="{{ url_for('pages.login_page') }}" data-nav="login">管理员</a>
+        <a href="{{ url_for('pages.login_page') }}" data-nav="login"{% if active_nav == 'login' %} class="active" aria-current="page"{% endif %}>管理员</a>
         {% endif %}
       </nav>
     </div>
@@ -52,7 +56,7 @@
         因此页面浏览与刷新<strong>不会</strong>产生任何模型调用，结果可复现。
       </p>
       <details class="fold">
-        <summary>数据口径与已知局限</summary>
+        <summary>数据说明与已知局限</summary>
         <div class="fold-body">
           <p>
             评论样本共 <strong>59,033</strong> 条，覆盖 <strong>837</strong> 个景点；
@@ -61,7 +65,7 @@
           </p>
           <p>
             客源地统计仅使用发布时间在 2022-08-01 之后的评论（平台自该日期起才展示 IP 归属地），
-            因此该项的有效样本量小于评论总数，页面对应位置会同时标注口径与有效样本量。
+            因此该项的有效样本量小于评论总数，页面对应位置会同时标注数据说明与有效样本量。
           </p>
           <p>
             评论情感与方面分析基于评论正文的语义判定，不含外部知识；

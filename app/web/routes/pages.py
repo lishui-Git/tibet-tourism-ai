@@ -47,8 +47,17 @@ def overview_page():
 
 @bp.get("/spots")
 def spots_page():
-    """景点分析。"""
-    return render_template("spots.html")
+    """景点分析。
+
+    支持 `?spot=<id>` 直达某景点的详情（详情在**页内**展开，不跳页）：
+    「智能分析」页在某个景点的智能评价不可用时，会用它把用户送回该景点的
+    基础统计与代表评论——因此这个参数必须真的能用，否则那条动线是断的。
+    非法值（非数字）按"未指定"处理，不报错。
+    """
+    spot = (request.args.get("spot") or "").strip()
+    if spot and not spot.isdigit():
+        spot = ""
+    return render_template("spots.html", initial_spot=spot)
 
 
 @bp.get("/smart")

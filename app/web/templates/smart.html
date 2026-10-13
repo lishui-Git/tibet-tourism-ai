@@ -2,16 +2,33 @@
 {% block title %}智能分析 · 西藏旅游景点智能评价与分析系统{% endblock %}
 {% block subtitle %}景点评价与智能问答{% endblock %}
 
+{#
+  内页页头（.page-hero）：与首页 Hero 同源的藏蓝渐变 + 自绘插画 + 经幡色带。
+  本页插画取"布达拉宫"（既有素材）——它是"景点综合评价"最直观的视觉符号。
+  原来放在卡片里的那段说明移到页头，避免与页头文案重复。
+#}
+{% block pagehead %}
+<section class="page-hero" data-art-box>
+  <img class="page-hero-art" src="{{ url_for('static', filename='img/scene-potala.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="page-hero-veil" aria-hidden="true"></div>
+  <div class="page-hero-inner">
+    <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
+    <h2>智能分析</h2>
+    <p class="page-hero-lead">
+      围绕景点评论的分析结果，提供两种用法：查看某个景点的<strong>综合评价</strong>，
+      或者用<strong>自然语言提问</strong>由系统基于评论数据作答。
+      所有结论均来自已入库的真实分析结果，不引入外部信息。
+    </p>
+    <p class="page-hero-meta">全部结论均来自真实评论数据</p>
+  </div>
+  <div class="flagline" aria-hidden="true"></div>
+</section>
+{% endblock %}
+
 {% block content %}
 
 <section class="card">
-  <h2>智能分析</h2>
-  <p class="hint">
-    围绕景点评论的分析结果，提供两种用法：查看某个景点的<strong>综合评价</strong>，
-    或者用<strong>自然语言提问</strong>由系统基于评论数据作答。
-    所有结论均来自已入库的真实分析结果，不引入外部信息。
-  </p>
-
   {# 子标签：两个子功能。默认停在"景点评价"（大多数人的第一诉求）。 #}
   <div class="subtabs" role="tablist">
     <button class="subtab" type="button" role="tab" data-tab="evaluation"

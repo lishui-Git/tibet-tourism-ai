@@ -11,11 +11,12 @@
 /** 下拉框中性键 → 接口实际取值（映射只发生在 JS 里，不进 HTML）。 */
 const METHOD_OF = { semantic: 'deepseek', baseline: 'mllib' };
 
-/** 接口取值 → 用户可读名称。 */
+/** 接口取值 → 用户可读名称。
+ *  【2026-10 表达规范】不用"语义判定／基线"这类方法学词，直接说清"依据什么算的"。 */
 const METHOD_LABELS = {
-  deepseek: '深度语义判定',
-  mllib: '统计基线判定',
-  dict: '词典判定',
+  deepseek: '按评论内容判读',
+  mllib: '按星级统计',
+  dict: '按关键词判定',
 };
 
 const methodLabel = m => METHOD_LABELS[m] || m;
@@ -184,7 +185,7 @@ async function loadSentiment(spotId) {
     const box = document.getElementById('chart-sentiment');
     if (!data.sample_size) {
       box.innerHTML = window.UI.empty(
-        `该景点暂无「${methodLabel(method)}」的情感判定结果。可以切换上方判定口径查看另一种结果。`, 'empty');
+        `该景点暂无「${methodLabel(method)}」的情感结果。可以切换上方的查看方式看另一种结果。`, 'empty');
       document.getElementById('sentiment-note').innerHTML = caliberNote(data.caliber_note, 0);
       return;
     }
@@ -210,7 +211,7 @@ async function loadSentiment(spotId) {
     const avail = Object.entries(data.available_methods || {})
       .map(([k, v]) => `${methodLabel(k)} ${fmtInt(v)} 条`).join('；') || '无';
     document.getElementById('sentiment-note').innerHTML =
-      caliberNote(`${data.caliber_note}　各口径可用条数：${avail}`, data.sample_size);
+      caliberNote(`${data.caliber_note}　两种查看方式各自可用的条数：${avail}`, data.sample_size);
   } catch (e) {
     showError('sentiment-note', e);
   }
@@ -318,6 +319,18 @@ async function loadReviews(spotId) {
 document.addEventListener('DOMContentLoaded', () => {
   loadRanking();
   loadSpots(1);
+
+  // 由 URL 带入的景点（`/spots?spot=<id>`，见 pages.py 的 spots_page）：
+  // 展开它的详情并滚到详情区。这里是"别处跳过来的用户"能否看到目标景点的唯一入口，
+  // 因此初值非法时也要安静跳过（接口层会兜住不存在的 id），不影响页面其余部分。
+  const initialSpot = (typeof window.__INITIAL_SPOT__ === 'string')
+    ? window.__INITIAL_SPOT__.trim() : '';
+  if (initialSpot) {
+    loadDetail(initialSpot).then(() => {
+      const card = document.getElementById('detail-card');
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch(() => { /* 详情加载失败时页面其余部分照常可用 */ });
+  }
 
   document.getElementById('rank-by').addEventListener('change', loadRanking);
   document.getElementById('rank-limit').addEventListener('change', loadRanking);

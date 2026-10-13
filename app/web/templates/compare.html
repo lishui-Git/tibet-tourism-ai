@@ -2,9 +2,35 @@
 {% block title %}景点对比 · 西藏旅游景点智能评价与分析系统{% endblock %}
 {% block subtitle %}逐项对照两个景点的游客评价{% endblock %}
 
+{#
+  内页页头（.page-hero）：与首页 Hero 同源的藏蓝渐变 + 自绘插画 + 经幡色带。
+  本页插画取"羊卓雍措"（既有素材）。对比页是首页首屏主按钮的落点，
+  页头与首页保持同一视觉语言，用户点进来不会有"换站"的感觉。
+#}
+{% block pagehead %}
+<section class="page-hero" data-art-box>
+  <img class="page-hero-art" src="{{ url_for('static', filename='img/scene-yamdrok.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="page-hero-veil" aria-hidden="true"></div>
+  <div class="page-hero-inner">
+    <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
+    <h2>景点对比</h2>
+    <p class="page-hero-lead">
+      用同一套统计方式逐项对照两个景点的评论量、平均评分、好评率、差评率、
+      情感分布与游客关注的方面，每一项都带样本量。
+    </p>
+    <p class="page-hero-meta">全部结论均来自真实评论数据</p>
+  </div>
+  <div class="flagline" aria-hidden="true"></div>
+</section>
+{% endblock %}
+
 {% block content %}
 <section class="card">
-  <h2>选择两个景点进行对比</h2>
+  <div class="section-title">
+    <h2>选择两个景点进行对比</h2>
+    <span class="st-sub">同一统计方式 · 逐项对照</span>
+  </div>
   <p class="hint">
     系统会逐项对照两个景点的评论量、平均评分、好评率、差评率、情感分布与游客关注的方面，
     并标出差距。请选择两个<strong>不同</strong>的景点。

@@ -1,17 +1,11 @@
-/* 首页：Hero 关键数据 + 核心数据 + 西藏景点视觉卡 + 评论量排行 + 结果生成情况。
+/* 首页：Hero 关键数据 + 核心数据 + 西藏景点视觉卡 + 评论量排行 + 分析覆盖与数据依据。
    只调用 /api/overview/summary、/api/spots/ranking、/api/spots —— 全部只读数据库。
 
    【文案纪律】本页是普通用户第一眼看到的内容，因此：
      · 不出现内部方法名、表名、内部状态码、API 成本、调用次数等实现细节；
      · "尚未生成"必须如实说明，绝不用估算值或示例内容填充；
+     · 分析覆盖区回答的是"结论建立在多少条真实评论上"，不是"后台跑了多少任务"；
      · 插画加载失败不影响数据展示（<img> 自然退化为卡片底色）。 */
-
-/** 内部方法名 → 用户能看懂的说法（仅展示层翻译，接口契约不变）。 */
-const METHOD_LABELS = {
-  deepseek: '深度语义判定',
-  mllib: '统计基线判定',
-  dict: '词典判定',
-};
 
 /** 视觉展示位：挑几个有地域代表性的景点，配自绘矢量插画。
  *
@@ -45,17 +39,22 @@ function pickMainSpot(items, query) {
  *
  *  口径说明（数字全部来自接口，不硬编码）：
  *    · 游客评论 = 全部已入库评论；
- *    · 有效评价 = 完成情感判定的评论数（已排除短评论与内容重复项），
- *      即库内 `sentiment` 表按"统计基线判定"口径覆盖的条数；
+ *    · 语义结构化 = 库内 `comment_semantic` 覆盖的评论条数（与 `sentiment` 的
+ *      "语义判定"口径同一档，当前 59,030 条）：每条评论都有结构化语义结果，
+ *      低信息量短评按既定规则产出，其余由模型逐条分析；
  *    · 覆盖景点 / 可生成完整评价 = 景点规模与门槛。
+ *
+ *  【2026-10 收尾优化】第三个数字此前取的是"统计基线"口径（47,110 条）并写作
+ *  "有效评价"，容易被误读成"系统只分析了 47,110 条"。改为直接展示**逐条语义
+ *  结构化**的真实条数，与首页"分析覆盖与数据依据"里的数字保持同一口径。
  */
-function renderHeroKpis(t, baselineCount) {
+function renderHeroKpis(t, semanticCount) {
   const box = document.getElementById('hero-kpis');
   if (!box) return;
   box.innerHTML = [
     { label: '游客评论', value: fmtInt(t.review_count), sub: '条真实评论' },
     { label: '覆盖景点', value: fmtInt(t.spot_count), sub: '个西藏及进藏沿线景点' },
-    { label: '有效评价', value: fmtInt(baselineCount), sub: '条已完成情感判定' },
+    { label: '评论语义分析', value: fmtInt(semanticCount), sub: '条评论已完成逐条语义结构化' },
     { label: '可生成完整评价', value: fmtInt(t.spot_ge100), sub: '评论量达到 100 条的景点' },
   ].map(k => `
     <div class="hero-kpi">
@@ -164,48 +163,52 @@ async function loadHome() {
     const t = data.totals || {};
     const cov = data.coverage || {};
 
-    // 有效评价 = 统计基线判定口径覆盖的条数（对应"已排除短评论与重复项"的业务口径）
-    const baseline = (cov.sentiment || []).find(s => s.method === 'mllib');
-    const baselineCount = baseline ? Number(baseline.n || 0) : 0;
+    // 语义结构化条数 = 逐条语义判定口径覆盖的评论数（comment_semantic 的行数）。
+    // 首页 Hero 与下方"分析覆盖与数据依据"共用这一个数，避免两处口径不一致。
+    const semantic = (cov.sentiment || []).find(s => s.method === 'deepseek');
+    const semanticCount = semantic ? Number(semantic.n || 0) : 0;
 
-    renderHeroKpis(t, baselineCount);
+    renderHeroKpis(t, semanticCount);
     renderHomeKpis(t, cov);
 
     const note = document.getElementById('home-summary-note');
     if (note) note.textContent = data.caliber_note || '';
     const cal = document.getElementById('home-caliber');
-    if (cal) cal.textContent = data.caliber_note || '暂无口径说明。';
+    if (cal) cal.textContent = data.caliber_note || '暂无数据说明。';
 
-    // 分析结果生成情况：如实展示
+    // 分析覆盖与数据依据。
+    //
+    // 【2026-10 收尾优化】这一块原来叫"分析结果生成情况"，列的是"已生成／暂未生成"，
+    // 对游客来说那是**后台生产进度**，不是他关心的问题。改为用同样真实的数字回答
+    // "这些结论建立在什么之上"：
+    //   ① 收录了多少条真实评论、覆盖多少个景点；
+    //   ② 其中多少条**逐条**完成了语义结构化（结论的唯一依据）；
+    //   ③ **只有评论量 ≥100 的 57 个景点**才有完整智能评价——绝不写成
+    //      "837 个景点全部完成智能分析"（那是与库内事实不符的表述）；
+    //   ④ 归纳出多少主题，用于观察游客在谈什么。
     const rep = cov.report || {};
     const reportsDone = Number(rep.reports_generated || 0);
     const reportsNeed = Number(rep.spots_ge100 || 0);
     const allReady = reportsNeed > 0 && reportsDone >= reportsNeed;
-    const sentText = (cov.sentiment || []).length
-      ? (cov.sentiment || []).map(s => `${METHOD_LABELS[s.method] || '情感判定'} ${fmtInt(s.n)} 条`).join('　·　')
-      : '暂无';
 
     document.getElementById('home-coverage').innerHTML = renderTable(
-      ['分析内容', '状态', '说明'],
+      ['分析内容', '覆盖规模', '说明'],
       [
-        ['评论统计（评分、趋势、来源地区）', '<span class="tag ok">已生成</span>',
-         `覆盖全部 ${fmtInt(t.review_count)} 条评论`],
-        ['评论情感判定', '<span class="tag ok">已生成</span>', sentText],
-        ['游客关注主题', '<span class="tag ok">已生成</span>',
-         `${fmtInt((cov.topic || {}).topic_count)} 个主题 / ${fmtInt((cov.topic || {}).topic_word_count)} 个主题词`],
-        ['景点综合智能评价',
-         allReady ? '<span class="tag ok">已生成</span>' : '<span class="tag warn">暂未生成</span>',
-         allReady
-           ? `已生成 ${fmtInt(reportsDone)} 个景点的评价`
-           : `已具备生成条件的景点 ${fmtInt(reportsNeed)} 个，当前已生成 ${fmtInt(reportsDone)} 个；`
-             + '在生成完成前，「智能分析」会如实显示"暂未生成"并继续提供基础统计'],
+        ['收录的游客评论', `${fmtInt(t.review_count)} 条`,
+         `来自 ${fmtInt(t.spot_count)} 个西藏及进藏沿线景点（西藏 ${fmtInt(t.spot_tibet)} · 进藏沿线 ${fmtInt(t.spot_route)}）`],
+        ['逐条完成语义结构化的评论', `${fmtInt(semanticCount)} 条`,
+         '逐条提取情感倾向、游客关注的方面与关键词，是所有景点结论的唯一依据'],
+        ['已生成完整智能评价的景点', `${fmtInt(reportsDone)} 个`,
+         `只对评论量达到 100 条的 ${fmtInt(reportsNeed)} 个景点生成评价；其余景点只提供基础统计，不强行下结论`],
+        ['归纳出的评论主题', `${fmtInt((cov.topic || {}).topic_count)} 个`,
+         `由 ${fmtInt((cov.topic || {}).topic_word_count)} 个主题词构成，用于观察游客在谈什么`],
       ]
     );
 
     if (!allReady) {
       document.getElementById('home-coverage').insertAdjacentHTML('beforeend',
-        '<div class="alert">景点综合智能评价需要较长的离线分析时间，目前尚未生成。'
-        + '在此之前，你仍然可以查看每个景点的评论统计、情感分布与代表性评论。</div>');
+        '<div class="alert">部分景点的完整智能评价仍在生成中。'
+        + '在此期间，所有景点都可以查看评论统计、情感分布、关注方面与代表性评论。</div>');
     }
 
     return t;

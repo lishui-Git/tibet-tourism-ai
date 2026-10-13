@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -205,6 +206,54 @@ def _indicator_rows(a: dict[str, Any], b: dict[str, Any]) -> list[dict[str, Any]
     return out
 
 
+def _iter_numbers(node: Any) -> list[float]:
+    """递归收集"对比事实"里允许被引用的数字（供数字一致性核对使用）。"""
+    values: list[float] = []
+    if isinstance(node, dict):
+        for value in node.values():
+            values.extend(_iter_numbers(value))
+    elif isinstance(node, list):
+        for value in node:
+            values.extend(_iter_numbers(value))
+    elif isinstance(node, bool):
+        pass                      # 布尔是 int 的子类，但不是"数据数字"，跳过
+    elif isinstance(node, (int, float)):
+        values.append(float(node))
+    return values
+
+
+# 数字 token（允许千分位逗号，例如 3,965）
+_NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _unmatched_numbers(text: str, allowed: list[float], ignore_below: float = 3.0) -> list[str]:
+    """找出解读里"在对比事实中找不到对应值"的数字（§15.D / BR-07 的防编造核对）。
+
+    与 QA 侧 `validate_answer` 的数字核对同一思路，但补了两点，避免误报：
+      · **先去掉千分位逗号**：否则 `3,965` 会被切成 3 与 965 两个 token；
+      · **兼容百分数写法**：事实里比率是 0.8782，模型可能写成 `87.82%`，
+        因此同时用 `value/100` 去匹配。
+
+    只做"标记待复核"，**绝不因此丢弃或改写解读内容**——与 need_review 的既有口径一致。
+    """
+    hits: list[str] = []
+    for token in _NUMBER_RE.findall(text or ""):
+        try:
+            value = float(token.replace(",", ""))
+        except ValueError:
+            continue
+        if value < ignore_below:      # 1–2 这类结构性小数字（条数、星级的序数）不参与判定
+            continue
+        candidates = (value, value / 100.0)
+        if not any(
+            abs(c - a) <= max(0.5, abs(a) * 0.01)
+            for c in candidates
+            for a in allowed
+        ):
+            hits.append(token)
+    return hits
+
+
 def _interpret(facts: dict[str, Any]) -> dict[str, Any]:
     """生成对比解读。
 
@@ -272,14 +321,29 @@ def _interpret(facts: dict[str, Any]) -> dict[str, Any]:
         except (LlmError, ValidationError) as exc2:
             return _degraded(facts, f"解读校验失败：{exc2}", CODE_LLM_FAILED)
 
+    # 【2026-10 Compare 闭环】除"违禁判定词"外，再做一次**数字一致性**核对：
+    # 解读里出现的数字必须能在"对比事实"中找到对应值，否则按保守策略标记待复核。
+    # 只标记、不改写、不丢弃——与 Report/QA 两侧的既有口径一致。
+    allowed_numbers = _iter_numbers(facts)
+    unmatched = _unmatched_numbers(
+        " ".join(parsed.differences + parsed.possible_reasons + [parsed.reliability_note]),
+        allowed_numbers,
+    )
+    notes: list[str] = []
+    if parsed.has_verdict:
+        notes.append("解读中出现了偏向性表述")
+    if unmatched:
+        notes.append("有个别数字未能与对比数据一一对应")
+    # 面向游客的提示：只说明"存在提示 + 怎么读"，不复述内部校验流程与字段名
     return {
         "available": True,
         "differences": parsed.differences,
         "possible_reasons": parsed.possible_reasons,
         "reliability_note": parsed.reliability_note or (facts["diff"]["reliability_warning"] or ""),
-        "need_review": parsed.has_verdict,
+        "need_review": bool(notes),
         "need_review_note": (
-            "解读中出现疑似『判定优劣』的表述，已标记待复核。" if parsed.has_verdict else None
+            "；".join(notes) + "。相关内容已由系统核对，建议结合各项的样本量综合判断。"
+            if notes else None
         ),
         "model": response.model,
         "prompt_version": COMPARE_PROMPT_VERSION,

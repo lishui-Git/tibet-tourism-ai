@@ -101,19 +101,38 @@ function renderCompare(d) {
   });
 
   const interp = d.interpretation || {};
+
+  // 有效样本量：对比页要同时给两个景点，因此**逐个**用 fmtInt 格式化后拼成一段文本，
+  // 再交给 caliberNote 的第三个参数（详见 common.js 中该函数的注释）。
+  // 两侧都取不到时不显示这一句，绝不出现 NaN。
+  const ss = d.sample_size || {};
+  const sampleText = (ss.spot_a === null || ss.spot_a === undefined)
+    && (ss.spot_b === null || ss.spot_b === undefined)
+    ? ''
+    : `${fmtInt(ss.spot_a)}（${A.spot_name}） / ${fmtInt(ss.spot_b)}（${B.spot_name}）`;
+
   const interpHtml = interp.available
     ? `
       <div class="rep-summary">
-        <h4>指标差异</h4>
+        <h4>主要差异</h4>
         <ul>${(interp.differences || []).map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
-        <h4>可能原因</h4>
+        <h4>可能的原因</h4>
         <ul>${(interp.possible_reasons || []).map(x => `<li>${escapeHtml(x)}</li>`).join('') || '<li class="muted">无</li>'}</ul>
-        ${interp.reliability_note ? window.UI.notice(interp.reliability_note, 'warn') : ''}
-        ${interp.need_review ? window.UI.notice(interp.need_review_note || '该解读待人工复核。', 'warn') : ''}
+        ${interp.reliability_note
+          ? `<p class="hint">比较的稳定程度：${escapeHtml(interp.reliability_note)}</p>` : ''}
+        ${interp.need_review ? window.UI.notice(interp.need_review_note
+            || '部分内容已由系统核对，建议结合各项样本量综合判断。', 'warn') : ''}
       </div>`
-    : window.UI.notice('本次没有生成文字解读（该项为可选功能，当前未开启）。'
-        + '这不影响下面的数据对比——所有指标差异都由系统直接计算，始终可用。', 'warn');
+    // 【措辞说明】不写成"功能未完成"，也不谎称"已支持"：
+    // 事实是**指标与方面的差异全部由系统直接计算、已经可用**；
+    // 只有"把差异组织成一段自然语言"属于可选的在线生成能力，演示环境默认关闭。
+    // 【2026-10 呈现收尾】这一条改为**弱化提示**（灰色小字）而不是告警条——
+    // 它是补充说明，不是错误；数据部分本来就已经可用。
+    : `<p class="hint">本页的指标、情感与方面对比都由系统直接算好，可以直接看；
+        另外还有一段用自然语言说明差异的内容，需要联网生成，当前演示环境默认关闭。</p>`;
 
+  // 【2026-10 呈现收尾 · 结论先行】能生成自然语言说明时，把它放在所有表格之前：
+  // 用户先读到"两个景点有什么不同"，再看支撑这些差异的数字。未开启时该位置只是一行灰字提示。
   return `
     ${window.UI.statCards([
       { label: '景点 A', value: escapeHtml(A.spot_name), sub: `${fmtInt(A.review_count)} 条评论` },
@@ -124,6 +143,9 @@ function renderCompare(d) {
     ])}
     ${diff.reliability_warning ? window.UI.notice(`${diff.reliability_warning}`, 'warn') : ''}
 
+    <h3>两个景点有什么不同</h3>
+    ${interpHtml}
+
     <h3>指标对比</h3>
     ${renderTable(['指标', escapeHtml(A.spot_name), escapeHtml(B.spot_name), '差值（A−B）'], indicatorRows)}
 
@@ -133,9 +155,9 @@ function renderCompare(d) {
       [sentRow('正面', 'positive'), sentRow('中性', 'neutral'), sentRow('负面', 'negative')]
     )}
     <p class="hint">
-      两侧均采用同一套判定口径，样本量为
+      两侧都用同一套统计方式，样本量为
       ${fmtInt((A.sentiment || {}).sample_size)} 条与 ${fmtInt((B.sentiment || {}).sample_size)} 条。
-      某一侧尚无判定结果时显示"—"，不会用另一种口径的数字顶替。
+      某一侧尚无结果时显示"—"，不会拿另一套方式的数字顶替。
     </p>
 
     <h3>游客关注的方面</h3>
@@ -144,9 +166,7 @@ function renderCompare(d) {
       ? renderTable(['方面', escapeHtml(A.spot_name), escapeHtml(B.spot_name), '可比性'], aspectRows)
       : window.UI.empty('这两个景点目前都还没有方面级分析结果。', 'empty')}
 
-    <h3>对比解读</h3>
-    ${interpHtml}
-    ${caliberNote(d.caliber_note, `${fmtInt((d.sample_size || {}).spot_a)} / ${fmtInt((d.sample_size || {}).spot_b)}`)}`;
+    ${caliberNote(d.caliber_note, null, sampleText)}`;
 }
 
 /** 提交前的校验：把"相同景点"这类问题在本地拦下，不让用户看到接口报错。 */

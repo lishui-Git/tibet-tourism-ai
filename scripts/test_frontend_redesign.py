@@ -332,9 +332,13 @@ def main() -> int:
     check("Hero 四个关键数字由接口渲染（非硬编码）",
           "renderHeroKpis" in home_js and "/api/overview/summary" in home_js, "")
     check("关键数字标签与设计要求一致",
-          all(k in home_js for k in ("游客评论", "覆盖景点", "有效评价", "可生成完整评价")), "")
-    check("有效评价取统计基线口径（47,110 对应的那一档）",
-          "mllib" in home_js and "baselineCount" in home_js, "")
+          all(k in home_js for k in ("游客评论", "覆盖景点", "评论语义分析", "可生成完整评价")), "")
+    # 【2026-10 收尾优化】Hero 第三个数字此前取"统计基线"口径（47,110）并写作"有效评价"，
+    # 容易被误读成"系统只分析了 47,110 条"。现改为**逐条语义结构化**的真实条数
+    # （59,030，与首页"分析覆盖与数据依据"同一口径），因此断言随之改为：
+    #   取 deepseek 那一档（semanticCount），且**不再**使用统计基线口径（baselineCount）。
+    check("语义结构化条数取逐条语义口径（59,030 那一档），不再用统计基线口径（47,110）",
+          "deepseek" in home_js and "semanticCount" in home_js and "baselineCount" not in home_js, "")
     check("首页含西藏景点视觉卡容器", 'id="home-scenic"' in home_html, "")
     check("风景卡插画加载失败有降级处理（不影响数据展示）",
           "data-scenic-art" in home_js and "scenic-noart" in c.get("/static/css/app.css").get_data(as_text=True), "")

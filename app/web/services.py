@@ -148,7 +148,10 @@ def overview_trend(granularity: str = "year") -> dict[str, Any]:
             for row in rows
         ],
         "total": total,
-        "caliber_note": CALIBER_TREND + " `sentiment_avg` 由 Spark 统计任务预留，当前为 NULL（未填充）。",
+        # 【2026-10 收尾优化】该文案会**直接渲染到前台**（/spots 时间趋势、/overview 趋势），
+        # 因此不得出现内部实现名与技术字段名（Spark / `sentiment_avg` / NULL / 阶段编号）——
+        # 它们对游客没有意义。改为如实说明"这一栏统计什么、什么暂未纳入"。
+        "caliber_note": CALIBER_TREND + " 本趋势按周期统计评论量与平均评分；评论的平均情感值暂未纳入趋势展示。",
         "sample_size": total,
     }
 
@@ -271,8 +274,8 @@ def overview_data_note() -> dict[str, Any]:
             CALIBER_THRESHOLD,
             CALIBER_ASPECT,
             "评论为历史快照，不含实时数据；系统不做实时分析。",
-            "评论情感有两种判定口径（深度语义判定与统计基线判定），两者的结论不可混用，"
-            "页面会分别标注所用的口径。",
+            "评论情感有两套统计结果（按星级统计、按评论内容判读），两者各算各的、不能混用，"
+            "页面会分别标注所用的结果。",
         ],
         "caliber_note": "以上为数据来源与已知局限说明。",
         "sample_size": scalar("SELECT COUNT(*) FROM review"),
@@ -442,7 +445,8 @@ def spot_sentiment(spot_id: int, method: str = "deepseek") -> dict[str, Any] | N
     )
     note = CALIBER_SENTIMENT
     if method == "deepseek" and total == 0:
-        note += " 该景点暂无 deepseek 方法结果（离线语义分析尚未覆盖到此景点）。"
+        # 面向用户：不写"口径"，也不用实现标识
+        note += " 该景点暂无「按评论内容判读」的情感结果（离线语义分析尚未覆盖到此景点）。"
     return {
         "spot_id": spot_id,
         "method": method,
@@ -561,7 +565,10 @@ def spot_topics(spot_id: int) -> dict[str, Any] | None:
     for topic in selected:
         topic["words"] = by_topic.get(int(topic["topic_id"]), [])
 
-    note = "主题模型由 Spark LDA 训练（阶段三）；单景点主题仅在具备完整评价资格且可建模评论 ≥100 条的景点上产出。"
+    # 【2026-10 收尾优化】原文案为"主题模型由 Spark LDA 训练（阶段三）…"，
+    # 会直接渲染到 /spots 的"评论主题"下方。去掉实现栈与阶段编号，保留方法学含义
+    # （LDA 是设计要求 FR-SA-06 写明的主题分析方法，不是内部实现细节）与门槛说明。
+    note = "主题由 LDA 主题模型从评论正文中训练得到；单景点主题仅在具备完整评价资格且可建模评论 ≥100 条的景点上产出。"
     if scope == "global":
         note += " 该景点暂无专属主题模型，此处展示全局主题。"
     return {
@@ -574,17 +581,22 @@ def spot_topics(spot_id: int) -> dict[str, Any] | None:
 
 
 def spot_reviews(spot_id: int, limit: int = 5) -> dict[str, Any] | None:
-    """代表性正负面评论（C-API-08，FR-SA-07：优先非重复正文）。"""
+    """代表性评论（C-API-08，FR-SA-07：优先非重复正文）。
+
+    【2026-10 景点评价页收尾】在原有"正面 / 负面"两组之上补两件事，**原有字段一个没动**
+    （`positive` / `negative` / `note` / `caliber_note` / `sample_size` 语义与取值都不变）：
+      · `neutral`：3 星评论。评价页的「游客真实声音」要覆盖正面、中性、负面三类体验，
+        只有正负两端会给人"非好即坏"的错觉；
+      · 每条评论附 `topics`：该评论**实际提到**的方面（取 `aspect` 表 method='deepseek'，
+        最多 3 个）。这是逐条评论的真实标注，不是模型现编的话题。
+    仍然是**只读 review / aspect 两张表**，不新增表、不调用任何模型。
+    """
     if not fetch_one("SELECT 1 FROM spot WHERE spot_id=%s", (spot_id,)):
         return None
     if limit < 1 or limit > 20:
         raise ParamError("limit 必须在 1–20 之间", code=1002)
 
-    def pick(polarity: str) -> list[dict]:
-        if polarity == "positive":
-            condition, order_extra = "r.score >= 4", "0"
-        else:
-            condition, order_extra = "r.score <= 2", "0"
+    def pick(condition: str) -> list[dict]:
         return fetch_all(
             f"""
             SELECT r.comment_id, r.content, r.score, r.like_count, r.publish_date,
@@ -598,18 +610,42 @@ def spot_reviews(spot_id: int, limit: int = 5) -> dict[str, Any] | None:
             (spot_id, limit),
         )
 
-    positive = pick("positive")
-    negative = pick("negative")
+    positive = pick("r.score >= 4")
+    neutral = pick("r.score = 3")
+    negative = pick("r.score <= 2")
+
+    # 逐条评论的真实话题（aspect 表，deepseek 口径）：一次查询取回，避免 N+1
+    picked = positive + neutral + negative
+    topics_map: dict[int, list[str]] = {}
+    if picked:
+        ids = [int(row["comment_id"]) for row in picked]
+        placeholders = ",".join(["%s"] * len(ids))
+        for row in fetch_all(
+            f"SELECT comment_id, aspect_name FROM aspect "
+            f"WHERE method='deepseek' AND comment_id IN ({placeholders}) "
+            f"ORDER BY aspect_name",
+            tuple(ids),
+        ):
+            bucket = topics_map.setdefault(int(row["comment_id"]), [])
+            if len(bucket) < 3 and row["aspect_name"] not in bucket:
+                bucket.append(row["aspect_name"])
+    for row in picked:
+        row["topics"] = topics_map.get(int(row["comment_id"]), [])
+
     return {
         "spot_id": spot_id,
         "positive": positive,
+        "neutral": neutral,
         "negative": negative,
         # 负面不足时如实留少，不凑数（§15.B.3）
         "note": (
             "代表评论筛选：排除低信息量 → 优先非重复正文 → 点赞数降序；"
             "负面评论不足时如实留少，不补造。"
         ),
-        "caliber_note": "代表评论仅用于展示原文依据，其数量不代表整体分布；分布请看统计与情感接口。",
+        "caliber_note": (
+            "以上是从评论中挑出的代表性原文，条数不代表整体评价分布；"
+            "整体分布请看页面上方的统计数字。"
+        ),
         "sample_size": len(positive) + len(negative),
     }
 
@@ -683,11 +719,14 @@ def spot_report(spot_id: int) -> dict[str, Any] | None:
         # 【措辞克制化】旧文案"存在与事实包不一致的数字"容易被误读成"这份评价是错的"。
         # 实测 41/57 份带此标记，而逐条归因表明 136 个"未命中"数字**全部可在数据依据中找到**
         # （多为日期、点赞数、介绍文本里的数字——它们不在校验器的"可引用数字清单"里），
-        # 并非模型自造。因此文案改为**解释性**表述，并明确"不代表评价有误"。
+        # 并非模型自造。
+        # 【2026-10 表达规范】这一句是**给游客看的**，因此不再描述内部核对流程：
+        #   · 不提"校验/一致性核对/保守策略/待人工复核/事实清单/need_review"等技术词；
+        #   · 保留"确实做过核对"这一事实与"结合样本量判断"的可执行建议；
+        #   · 不制造"系统坏了/结论不可信"的观感，也不用"已经证实"这类绝对说法。
         "need_review_note": (
-            "系统已对评价中的数字做自动核对：其中若干数字未在下方「数据依据」的清单中直接命中"
-            "（多见于日期、点赞数等），因此按保守策略标记为「待人工复核」。"
-            "这不代表评价有误——评价内容与全部结果均已正常生成并入库。"
+            "部分统计数据存在一致性提示，相关内容已由系统核对；"
+            "阅读时建议结合各项的样本量综合判断。"
             if report["need_review"] else None
         ),
         "model": report["model"],
