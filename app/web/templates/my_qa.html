@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}我的问答 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}我的提问记录{% endblock %}
+
+{% block pagehead %}
+<section class="page-hero" data-art-box>
+  <img class="page-hero-art" src="{{ url_for('static', filename='img/scene-namtso.svg') }}"
+       alt="" aria-hidden="true" decoding="async" data-art>
+  <div class="page-hero-veil" aria-hidden="true"></div>
+  <div class="page-hero-inner">
+    <p class="hero-eyebrow">普通用户 · 个人记录</p>
+    <h2>我的问答</h2>
+    <p class="page-hero-lead">
+      这里只显示当前登录账号自己的提问记录，按时间倒序排列；
+      其他用户的记录不会出现在本页。
+    </p>
+    <p class="page-hero-meta">记录来自问答接口，不在浏览页面时触发模型调用</p>
+  </div>
+  <div class="flagline" aria-hidden="true"></div>
+</section>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="myqa-toolbar">
+    <div class="section-title">
+      <h2>提问记录</h2>
+      <span class="st-sub">按时间倒序 · 仅本人可见</span>
+    </div>
+    <a class="link" href="{{ url_for('pages.smart_page', tab='qa') }}">去智能问答提问 →</a>
+  </div>
+  <p class="hint">
+    每条记录包含问题、问题类型、涉及景点数量与系统当时保存的回答；
+    自然语言回答未生成时，下方会如实说明。
+  </p>
+  <div id="myqa-list">
+    <div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>加载中…</span></div>
+  </div>
+  <div id="myqa-pager" class="pager"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/my_qa.js') }}"></script>
+{% endblock %}

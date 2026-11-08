@@ -61,7 +61,7 @@ def cleanup(
     旧实现按 `spot_id` 无条件删这两张表，Stage 5 生成生产评价后会把**真实结果删掉**。
     景点级结果的"临时清空 + 精确还原"统一交给 `result_isolation.isolated_spot_results`。
 
-    返回 `(sys_user 剩余, 删除用户数, analysis_task 剩余)`。
+    返回 `(本测试用户剩余, 删除用户数, analysis_task 剩余, sys_user 总行数)`。
     """
     with connection() as conn:
         with conn.cursor() as cur:
@@ -72,11 +72,15 @@ def cleanup(
                 ph = ",".join(["%s"] * len(user_ids))
                 cur.execute(f"DELETE FROM sys_user WHERE user_id IN ({ph})", tuple(user_ids))
                 deleted_users = cur.rowcount
+                cur.execute(f"SELECT COUNT(*) AS n FROM sys_user WHERE user_id IN ({ph})", tuple(user_ids))
+                left_test_users = int(cur.fetchone()["n"])
+            else:
+                left_test_users = 0
             cur.execute("SELECT COUNT(*) AS n FROM sys_user")
             left_users = int(cur.fetchone()["n"])
             cur.execute("SELECT COUNT(*) AS n FROM analysis_task")
             left_tasks = int(cur.fetchone()["n"])
-    return left_users, deleted_users, left_tasks
+    return left_test_users, deleted_users, left_tasks, left_users
 
 
 def _target_spot_id() -> int:
@@ -218,13 +222,14 @@ def _run_body() -> int:
           f"available={body['data'].get('available')}")
 
     # ---------- 清理（只清用户与任务；景点级结果由隔离层精确还原） ----------
-    left_users, deleted_users, left_tasks = cleanup(
+    left_test_users, deleted_users, left_tasks, left_users = cleanup(
         spot_id, task_floor, [u for u in (admin_id, normal.user_id) if u]
     )
-    print(f"\n已清理：删除用户 {deleted_users} 个；sys_user 剩余 {left_users} 行、"
-          f"analysis_task 剩余 {left_tasks} 行（spot_report / fact_package 由隔离层还原）")
+    print(f"\n已清理：删除用户 {deleted_users} 个；本测试用户剩余 {left_test_users} 行、"
+          f"sys_user 共 {left_users} 行（可能含演示账号）；analysis_task 剩余 {left_tasks} 行"
+          f"（spot_report / fact_package 由隔离层还原）")
     check("清理时确实删除了本次创建的用户", deleted_users == 2, f"影响行数 {deleted_users}")
-    check("清理后无测试用户残留", left_users == 0, f"剩余 {left_users}")
+    check("清理后本测试用户无残留", left_test_users == 0, f"剩余 {left_test_users}")
     # 这条断言是本轮补的：run_fact_package / run_spot_report 会在内部自行登记任务，
     # 早先只删"接口层收集到的 id"导致先后泄漏了 6 条 fact_package 任务行。
     check("清理后 analysis_task 行数回到测试前基线（无任务泄漏）",

@@ -11,8 +11,9 @@
     `/spots`       景点分析      排行榜、检索、景点详情（情感／趋势／方面／主题／评论）
     `/smart`       智能分析      **整合页**：景点评价 + 智能问答（子标签切换）
     `/compare`     景点对比      指标差异由后端计算；解读默认关闭
-    `/admin`       管理后台      **需登录**：任务状态、系统日志、数据口径、系统自检
-    `/login`       管理员登录
+    `/my-qa`       我的问答      **需登录**：只显示当前用户自己的问答历史
+    `/admin`       管理后台      **需管理员**：任务状态、系统日志、数据口径、系统自检
+    `/login`       统一登录      普通用户与管理员共用入口
 
 【为什么把「智能评价」与「智能问答」合并】
     两者都是"针对某个景点的智能问答式输出"，原来是两个一级入口，
@@ -66,14 +67,21 @@ def smart_page():
 
     `?tab=evaluation|qa` 决定初始子标签；支持 `?spot=<id>` 直达某景点的评价，
     便于从「景点分析」页一键跳过来看该景点的智能评价。
+    `?q=<问题>` 用于首页 AI 入口/业务页联动：默认切到问答标签并预填问题。
     """
-    tab = (request.args.get("tab") or "evaluation").strip().lower()
+    tab = (request.args.get("tab") or "").strip().lower()
+    question = (request.args.get("q") or "").strip()[:200]
     if tab not in ("evaluation", "qa"):
-        tab = "evaluation"
+        tab = "qa" if question else "evaluation"
     spot = (request.args.get("spot") or "").strip()
     if spot and not spot.isdigit():
         spot = ""
-    return render_template("smart.html", initial_tab=tab, initial_spot=spot)
+    return render_template(
+        "smart.html",
+        initial_tab=tab,
+        initial_spot=spot,
+        initial_question=question,
+    )
 
 
 @bp.get("/compare")
@@ -84,20 +92,37 @@ def compare_page():
 
 @bp.get("/admin")
 def admin_page():
-    """管理后台（**需登录**）。
+    """管理后台（**需管理员**）。
 
-    服务端在渲染前检查会话：未登录直接重定向到登录页——
-    避免"页面能打开但里面每个接口都 401"的破壳体验。
-    （真正的权限边界仍在 API 层：`admin_required`，页面重定向只是体验优化。）
+    服务端在渲染前检查会话与角色：
+    · 未登录 → 登录页（带 next，登录后回到 /admin）；
+    · 已登录但非管理员 → 403 友好页，而不是"页面能打开、里面每个接口都 403"的空壳。
+    （真正的权限边界仍在 API 层：`admin_required`，页面检查只是体验优化。）
     """
-    if current_user() is None:
-        return redirect(url_for("pages.login_page"))
+    user = current_user()
+    if user is None:
+        return redirect(url_for("pages.login_page", next=request.path))
+    if not user.is_admin:
+        return render_template(
+            "error.html",
+            code=403,
+            title="无权访问管理后台",
+            detail="当前账号是普通用户，不能进入管理后台。普通用户可以在「我的问答」查看自己的提问记录。",
+        ), 403
     return render_template("admin.html")
+
+
+@bp.get("/my-qa")
+def my_qa_page():
+    """我的问答（需登录）：只展示当前用户自己的问答历史。"""
+    if current_user() is None:
+        return redirect(url_for("pages.login_page", next=request.path))
+    return render_template("my_qa.html")
 
 
 @bp.get("/login")
 def login_page():
-    """管理员登录页。"""
+    """统一登录页（普通用户与管理员共用入口）。"""
     return render_template("login.html")
 
 

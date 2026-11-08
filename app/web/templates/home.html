@@ -17,8 +17,12 @@
   <div class="hero-veil" aria-hidden="true"></div>
 
   <div class="hero-inner">
-    <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
-    <h2>读懂每一条游客评论，看清每个景点的真实口碑</h2>
+    <p class="hero-eyebrow">
+      <span class="hero-seal" aria-hidden="true">藏</span>
+      西藏 · 进藏沿线旅游评论分析
+      <span class="hero-en">TIBET TOURISM INTELLIGENCE</span>
+    </p>
+    <h2>读懂每一条游客评论<br><span class="hero-em">看清每个景点的真实口碑</span></h2>
     <p class="hero-sub">
       汇集西藏及进藏沿线景点的游客评论，从评论中提炼评分分布、情感倾向、
       游客关注点与不足之处，帮助旅行者与管理者了解每个景点"游客到底怎么说"。
@@ -36,12 +40,54 @@
       <a class="btn-hero" href="/compare">开始景点对比</a>
       <a class="btn-hero ghost" href="/smart">直接看景点评价</a>
     </div>
+    <p class="hero-note"><span class="hero-note-dot" aria-hidden="true"></span>真实入库数据 · 离线分析 · 浏览与刷新不产生模型调用</p>
   </div>
   <div class="flagline" aria-hidden="true"></div>
 </section>
 
+{#
+  AI 智能助手入口
+  ============================================================================
+  放在首屏 Hero 之后、数据规模之前：用户先看到"可以问什么"，再看到"数据有多少"。
+  这里只做入口与问题预填，真正的回答仍在 /smart?tab=qa（复用现有 /api/qa/ask），
+  不在首页虚构回答，也不在首页直接触发模型调用。
+  ============================================================================
+#}
+<section class="card ai-entry">
+  <p class="section-kicker">AI ASSISTANT · 评论问答</p>
+  <div class="ai-entry-head">
+    <span class="ai-mark" aria-hidden="true">AI</span>
+    <div>
+      <p class="ai-eyebrow">AI 智能助手</p>
+      <h2>直接问，看看游客到底怎么说</h2>
+    </div>
+  </div>
+  <p class="ai-desc">
+    用一句话提问，系统会先在已入库的评论分析结果中检索事实，再据此回答。
+    支持景点评价、满意度排行、两景点对比与关注方面等问题。
+  </p>
+  <form id="home-ai-form" class="ai-form" action="/smart">
+    <input type="hidden" name="tab" value="qa" />
+    <input id="home-ai-input" name="q" type="text" maxlength="200"
+           placeholder="例如：布达拉宫的游客评价如何？" autocomplete="off" />
+    <button type="submit">开始提问</button>
+  </form>
+  <div class="ai-examples" aria-label="示例问题">
+    <span>可以试试：</span>
+    <button type="button" class="ai-example" data-q="布达拉宫的游客评价如何？">布达拉宫的游客评价如何？</button>
+    <button type="button" class="ai-example" data-q="哪些景点的游客满意度较高？">哪些景点的游客满意度较高？</button>
+    <button type="button" class="ai-example" data-q="比较布达拉宫和纳木措景区的游客评价">比较两个景点的游客评价</button>
+    <button type="button" class="ai-example" data-q="根据现有评论数据总结布达拉宫的优缺点">总结布达拉宫的优缺点</button>
+  </div>
+  <p class="ai-note">
+    示例问题都已用现有分类与检索链路核实；未开启在线生成时，页面会展示可核对的数据依据，
+    不会用固定文案冒充 AI 回答。
+  </p>
+</section>
+
 {# 核心数据：比普通统计卡更醒目（左侧强调条 + 大号数字） #}
 <section class="card">
+  <p class="section-kicker">DATA SCALE · 01</p>
   <div class="section-title">
     <h2>数据规模</h2>
     <span class="st-sub">以下是本系统当前已收录并完成分析的数据量</span>
@@ -57,6 +103,7 @@
    理由：对比页同时呈现同口径指标、方面级结论与样本量，是用户自己做取舍时最直接的一屏；
    数据总览是背景资料，放在最后。只调整顺序与文案，不新增功能。 #}
 <section class="band">
+  <p class="section-kicker">WORKSPACE · 02</p>
   <div class="section-title">
     <h2>系统能做什么</h2>
     <span class="st-sub">四个入口，无需登录</span>
@@ -92,6 +139,7 @@
   若插画文件缺失或加载失败，`<img>` 会退化为卡片底色，布局不受影响。
 #}
 <section class="card">
+  <p class="section-kicker">DESTINATIONS · 03</p>
   <div class="section-title">
     <h2>高原上的热门景点</h2>
     <span class="st-sub">点击任意景点，查看它的评价与分析</span>
@@ -103,6 +151,7 @@
 
 {# 热门景点榜单（评论量） #}
 <section class="card">
+  <p class="section-kicker">RANKING · 04</p>
   <div class="section-title">
     <h2>评论量排行</h2>
     <span class="st-sub">游客讨论最多的景点</span>
@@ -115,6 +164,7 @@
 {# 分析覆盖与可信度：这一块回答的是"这些结论建立在多少条真实评论上"，
    而不是"后台跑了多少任务"。数字全部来自接口，覆盖不到的地方如实说明。#}
 <section class="card">
+  <p class="section-kicker">EVIDENCE · 05</p>
   <div class="section-title">
     <h2>分析覆盖与数据依据</h2>
     <span class="st-sub">以下结论都建立在真实评论数据上；样本不足的部分系统会明确说明，不用估算值代替</span>

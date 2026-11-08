@@ -235,7 +235,32 @@ async function loadRanking() {
   }
 }
 
+/** 首页 AI 入口：只负责校验与跳转，回答仍由 /smart?tab=qa 完成。 */
+function initHomeAi() {
+  const form = document.getElementById('home-ai-form');
+  const input = document.getElementById('home-ai-input');
+  if (!form || !input) return;
+
+  form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const q = input.value.trim();
+    if (!q) {
+      input.focus();
+      return;
+    }
+    window.location.href = `/smart?tab=qa&q=${encodeURIComponent(q)}`;
+  });
+
+  document.querySelectorAll('.ai-example[data-q]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      input.value = btn.getAttribute('data-q') || '';
+      input.focus();
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  initHomeAi();
   loadHome();
   loadRanking();
 });

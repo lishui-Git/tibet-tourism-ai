@@ -27,6 +27,16 @@ function switchTab(tab, opts) {
     panel.hidden = panel.id !== `panel-${tab}`;
   });
 
+  // 问答标签聚焦聊天区域：页头较高，若不滚动，底部输入区会落在首屏之外。
+  if (tab === 'qa' && options.scroll !== false) {
+    const chat = document.querySelector('.qa-chat');
+    if (chat) {
+      const reduce = window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      chat.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }
+  }
+
   // 首次进入某标签时才初始化它（问答页尤其不该一进页面就发请求）
   if (!tabInited[tab]) {
     tabInited[tab] = true;
@@ -52,6 +62,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const initial = (window.__INITIAL_TAB__ === 'qa') ? 'qa' : 'evaluation';
   switchTab(initial, { focus: false });
+
+  // 首页 AI 入口 / 业务页联动带来的问题：预填并直接提问。
+  // 只走现有 /api/qa/ask；是否调用模型仍由后端 APP_QA_LIVE 决定。
+  const initialQuestion = (window.__INITIAL_QUESTION__ || '').trim();
+  if (initialQuestion) {
+    if (initial !== 'qa') switchTab('qa', { focus: false });
+    const input = document.getElementById('qa-question');
+    if (input) input.value = initialQuestion;
+    if (typeof doAsk === 'function') doAsk(initialQuestion);
+  }
 
   // 带 ?spot= 进来时：等景点下拉加载完再选中并直接出评价。
   // evaluation.js 的 loadSpotOptions 是异步的，这里用轮询等待选项就绪

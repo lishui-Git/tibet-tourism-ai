@@ -145,6 +145,9 @@ function renderCompare(d) {
 
     <h3>两个景点有什么不同</h3>
     ${interpHtml}
+    <p>
+      <a class="ai-inline" href="/smart?tab=qa&amp;q=${encodeURIComponent('比较' + A.spot_name + '和' + B.spot_name + '的游客评价')}">让 AI 总结对比结果 →</a>
+    </p>
 
     <h3>指标对比</h3>
     ${renderTable(['指标', escapeHtml(A.spot_name), escapeHtml(B.spot_name), '差值（A−B）'], indicatorRows)}
@@ -190,12 +193,19 @@ async function doCompare() {
   const box = document.getElementById('cmp-body');
   if (!validateSelection(a, b)) return;
 
-  box.innerHTML = '<p class="hint">计算中…</p>';
+  box.innerHTML = window.UI.loading('计算中…');
   try {
     const data = await apiGet('/api/compare', { spot_a: a, spot_b: b });
     // 返回体留控制台（含解读的 model / prompt_version / token / reason 等内部字段）
     try { console.info('[景点对比] 接口返回', data); window.__lastCompare = data; } catch (e2) { /* 忽略 */ }
     box.innerHTML = renderCompare(data);
+    // 结果区在控件下方；渲染后主动把第一段结果带到视野内，
+    // 否则用户点完按钮仍停在选择区，容易误以为"没有结果"。
+    const heading = box.querySelector('h3');
+    if (heading) {
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      heading.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }
   } catch (e) {
     // 兜底：即使后端拒绝（例如传了同一个景点），也只给用户看人话
     box.innerHTML = window.UI.notice(

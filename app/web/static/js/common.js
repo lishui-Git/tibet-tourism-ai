@@ -32,10 +32,12 @@ async function apiGet(path, params) {
 const USER_FACING_CODE_TEXT = {
   1001: '提交的内容格式不正确，请检查后重试。',
   1002: '请求的参数不完整或超出允许范围，请调整后重试。',
-  2001: '你没有权限执行该操作，请先登录管理员账号。',
-  2002: '登录状态已过期，请重新登录。',
-  2003: '账号或密码不正确，请重新输入。',
-  2004: '该账号已被停用，请联系系统管理员。',
+  // 2001/2002/2003/2004 必须与 response.py 的码表一一对应：
+  // 2001=未登录，2002=权限不足，2003=用户名已存在，2004=用户名或口令错误。
+  2001: '登录状态已失效，请重新登录。',
+  2002: '当前账号没有访问该功能的权限。',
+  2003: '该用户名已被注册，请换一个。',
+  2004: '用户名或口令不正确，请重新输入。',
   3001: '你要查看的内容不存在，可能已被调整或链接有误。',
   4001: '智能问答暂时不可用，请稍后重试或在下方查看数据依据。',
   4002: '提问内容超出系统可回答的范围。',
@@ -76,9 +78,17 @@ function humanize(text) {
 
 /** 组装"用户提示 + 可折叠技术详情"的提示块。 */
 function noticeBox(text, kind, technical) {
-  const cls = kind === 'bad' ? 'alert bad' : (kind === 'warn' ? 'alert warn' : 'alert');
+  const cls = kind === 'bad' ? 'alert bad'
+    : (kind === 'warn' ? 'alert warn'
+      : (kind === 'ok' ? 'alert ok' : 'alert'));
   const head = text ? `<div class="${cls}">${escapeHtml(text)}</div>` : '';
   return head + techDetails(technical);
+}
+
+/** 统一加载态：小号旋转指示 + 文案（各页面不要再用裸 `<p>加载中…</p>`）。 */
+function loadingState(text) {
+  return `<div class="loading-state"><span class="spinner" aria-hidden="true"></span>
+    <span>${escapeHtml(text || '加载中…')}</span></div>`;
 }
 
 /** 只渲染"可折叠技术详情"（不想要提示语、只想要细节时用它）。 */
@@ -163,27 +173,60 @@ function caliberNote(text, sampleSize, sampleText) {
   return `<div class="caliber">数据说明：${escapeHtml(text)}${sample}</div>`;
 }
 
-/** 数据表：rows 为二维数组，head 为表头。 */
+/** 数据表：rows 为二维数组，head 为表头。
+ *
+ *  【为什么返回外层 .table-wrap】此前 `.data-table { display:block }` 既承担
+ *  "窄屏横向滚动"，又让表格宽度退化成内容宽度——桌面 1200px 卡片里表格只有
+ *  约 660px，右侧一片空白。改为"外层滚动容器 + 内层真正的 table"：
+ *  宽屏撑满、窄屏在卡片内部横向滚动，两件事互不干扰。
+ */
 function renderTable(head, rows) {
   const thead = '<tr>' + head.map(h => `<th class="th-plain">${escapeHtml(h)}</th>`).join('') + '</tr>';
   const tbody = rows.map(r => '<tr>' + r.map(c => `<td>${c === null || c === undefined ? '—' : c}</td>`).join('') + '</tr>').join('');
-  return `<table class="data-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+  return `<div class="table-wrap"><table class="data-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 /** ECharts 实例登记，窗口变化时统一 resize。 */
 const _charts = [];
+
+/** 折线/柱状图的通用配色（与 CSS 主色系一致：藏蓝青为主，暖金/绿/红为辅）。 */
+const CHART_COLORS = ['#12495a', '#2b8fae', '#a96d24', '#3e7a5a', '#8b2323', '#4a6fa5', '#7b817f'];
+
+/** 图表与正文共用一套中文字体栈；否则 ECharts 会退回 Arial，与页面明显不是一套设计。 */
+const CHART_FONT = '"Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Segoe UI", system-ui, Arial, sans-serif';
+
+/* 图表基础主题：只统一"字体 / 文字色 / tooltip / 默认色板"，
+   具体图形（环图、柱状、折线）的 series 配置仍由各页面决定。
+   这样改不会改变任何指标口径，也不会把页面改成"大屏风"。 */
+function applyChartBase(option) {
+  const themed = Object.assign({}, option);
+  themed.textStyle = Object.assign(
+    { fontFamily: CHART_FONT, color: '#48555a' },
+    option.textStyle || {}
+  );
+  if (!themed.color) themed.color = CHART_COLORS;
+  if (option.tooltip && !Array.isArray(option.tooltip)) {
+    themed.tooltip = Object.assign({
+      backgroundColor: '#fffdf9',
+      borderColor: '#e2dbcf',
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { fontFamily: CHART_FONT, color: '#1b2429', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 6px 20px rgba(35,30,22,.10); border-radius: 8px;',
+    }, option.tooltip);
+  }
+  return themed;
+}
+
 function initChart(domId, option) {
   const dom = document.getElementById(domId);
   if (!dom || typeof echarts === 'undefined') return null;
   const chart = echarts.init(dom);
-  chart.setOption(option);
+  chart.setOption(applyChartBase(option));
   _charts.push(chart);
   return chart;
 }
 window.addEventListener('resize', () => _charts.forEach(c => c.resize()));
-
-/** 折线/柱状图的通用配色（与 CSS 主色系一致：深青为主，暖棕/绿/红为辅）。 */
-const CHART_COLORS = ['#0f5f6b', '#a2603a', '#2f7d4f', '#b06a12', '#b3352f', '#4a6fa5', '#6b7c93'];
 
 /* -----------------------------------------------------------------------------
    装饰插画的兜底：任何插画加载失败都不能影响页面可用性
@@ -230,6 +273,91 @@ function _initBackToTop() {
 }
 
 /* -----------------------------------------------------------------------------
+   登录态与用户菜单（全局）
+   ----------------------------------------------------------------------------- */
+window.AUTH = {
+  /** 登录成功后的默认落地页：管理员进后台，普通用户进"我的问答"。 */
+  homeFor(user) {
+    return user && user.is_admin ? '/admin' : '/my-qa';
+  },
+
+  /** 只接受站内绝对路径，拒绝 //evil、http(s):// 外站与登录页自身。 */
+  safeNext(next) {
+    if (!next) return null;
+    try {
+      const url = new URL(next, window.location.origin);
+      if (url.origin !== window.location.origin) return null;
+      if (!url.pathname.startsWith('/') || url.pathname === '/login') return null;
+      return url.pathname + url.search + url.hash;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  /** 结合角色判断 next：普通用户不能借 next 进入 /admin。 */
+  nextFor(user, next) {
+    const safe = this.safeNext(next);
+    if (!safe) return this.homeFor(user);
+    if (safe.startsWith('/admin') && !(user && user.is_admin)) return this.homeFor(user);
+    return safe;
+  },
+};
+
+/* 统一 401 处理：受保护页面（/admin、/my-qa）会话过期时回登录页，
+   并带上 next 以便重新登录后回到原页面；登录页自身的 /api/auth/me 探测不参与跳转。 */
+if (typeof axios !== 'undefined') {
+  axios.interceptors.response.use(
+    response => response,
+    error => {
+      const data = error && error.response && error.response.data;
+      const path = window.location.pathname + window.location.search;
+      const protectedPage = path.startsWith('/admin') || path.startsWith('/my-qa');
+      if (data && data.code === 2001 && protectedPage) {
+        window.location.href = `/login?next=${encodeURIComponent(path)}`;
+      }
+      return Promise.reject(error);
+    }
+  );
+}
+
+/** 顶部用户菜单：展开/收起 + 退出登录。 */
+function _initUserMenu() {
+  const btn = document.getElementById('user-menu-btn');
+  const menu = document.getElementById('user-menu');
+  if (!btn || !menu) return;
+
+  const setOpen = open => {
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+
+  btn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    setOpen(menu.hidden);
+  });
+  document.addEventListener('click', ev => {
+    if (menu.hidden) return;
+    if (!menu.contains(ev.target) && !btn.contains(ev.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') setOpen(false);
+  });
+
+  const logout = document.getElementById('btn-logout-global');
+  if (logout) {
+    logout.addEventListener('click', async () => {
+      logout.disabled = true;
+      try {
+        await axios.post('/api/auth/logout');
+      } catch (e) {
+        // 会话可能已经失效；仍然回到首页，避免停在"看起来还登录着"的状态
+      }
+      window.location.href = '/';
+    });
+  }
+}
+
+/* -----------------------------------------------------------------------------
    页面级工具（挂到 window.UI，供各页面脚本复用，避免每页重复实现）
    -------------------------------------------------------------------------- */
 window.UI = {
@@ -249,8 +377,14 @@ window.UI = {
         <span class="stat-value">${it.value}</span>
         ${it.sub ? `<span class="stat-sub">${escapeHtml(it.sub)}</span>` : ''}
       </div>`).join('');
-    return `<div class="stat-grid">${cells}</div>`;
+    /* 列数随条目数收敛：4 条一行、3 条一行；6 条用 3+3、8 条用 4+4，
+       不再出现"5 列 + 第二行只剩 3 张"的参差。窄屏由 CSS 降为 2 列/1 列。 */
+    const cols = items.length === 6 ? 3 : Math.max(1, Math.min(items.length, 4));
+    return `<div class="stat-grid cols-${cols}">${cells}</div>`;
   },
+
+  /** 统一加载态（旋转指示 + 文案） */
+  loading(text) { return loadingState(text); },
 
   /** 加载失败或"无数据"的统一提示块 */
   empty(text, kind) {
@@ -287,6 +421,7 @@ window.UI = {
 document.addEventListener('DOMContentLoaded', () => {
   _initBackToTop();
   _initArtFallback();
+  _initUserMenu();
 });
 
 

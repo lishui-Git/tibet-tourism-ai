@@ -114,7 +114,7 @@ async function loadReport() {
     box.innerHTML = window.UI.empty('请先在上方选择一个景点。', 'warn');
     return;
   }
-  box.innerHTML = '<p class="hint">加载中…</p>';
+  box.innerHTML = window.UI.loading('加载中…');
   try {
     const data = await apiGet(`/api/spots/${spotId}/report`);
 
@@ -434,7 +434,7 @@ async function doRegenerate() {
     const d = body.data || {};
     box.innerHTML = d.submitted
       ? window.UI.notice('已登记重新生成请求，稍后由离线任务处理。'
-          + '该操作只登记请求，不会立即产生分析结果，也不会在浏览页面时触发任何模型调用。', '')
+          + '该操作只登记请求，不会立即产生分析结果，也不会在浏览页面时触发任何模型调用。', 'ok')
       : window.UI.notice(d.message_text || '该景点不生成智能评价。', 'warn');
   } catch (e) {
     const data = e.response && e.response.data;

@@ -175,11 +175,11 @@ def check_routes(doc: str) -> None:
     )
     print(f"      · API 路由 {len(api)} 个；页面/自检路由 {len(pages)} 个")
     check("API 路由数 ≥ 27（手册口径）", len(api) >= 27, f"实际 {len(api)}")
-    check("页面与自检路由数 ≥ 11（手册口径）", len(pages) >= 11, f"实际 {len(pages)}")
+    check("页面与自检路由数 ≥ 12（手册口径）", len(pages) >= 12, f"实际 {len(pages)}")
     # 手册必须提到这两类规模
-    # 【口径修正】实测为 11 个（含 3 个旧地址重定向与 /healthz）；
-    # 旧字面值 "9 个页面" 是前台改版前的计数，与实测不符，已随手册一并更正。
-    check("手册写明了接口/页面规模", "27 个 API 路由" in doc and "11 个页面" in doc, "")
+    # 【口径修正】实测为 12 个（8 个内容页面 + 3 个旧地址重定向 + /healthz）；
+    # 旧字面值 "11 个页面" 是新增 /my-qa 之前的计数，已随手册一并更正。
+    check("手册写明了接口/页面规模", "27 个 API 路由" in doc and "12 个页面" in doc, "")
 
 
 def check_index_freshness() -> None:

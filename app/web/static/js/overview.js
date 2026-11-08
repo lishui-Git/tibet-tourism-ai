@@ -13,16 +13,31 @@ function renderScoreChart(dist, total) {
       trigger: 'item',
       formatter: p => `${p.name}：${fmtInt(p.value)} 条（${p.percent}%）`,
     },
-    legend: { bottom: 0 },
+    legend: {
+      bottom: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { fontSize: 11 },
+    },
     series: [{
       type: 'pie',
       radius: ['42%', '68%'],
-      label: { formatter: '{b}\n{d}%' },
+      // 饼图外标签在 500px 窄屏会互相压住；hideOverlap 让 ECharts 自动收敛，
+      // 完整名称与数值仍可从图例/悬浮提示读取（不改任何数据）。
+      label: { formatter: '{b}\n{d}%', fontSize: 11 },
+      labelLine: { length: 8, length2: 8 },
+      labelLayout: { hideOverlap: true },
       data: dist.map((d, i) => ({
         name: `${d.score} 星`,
         value: d.count,
-        itemStyle: { color: ['#b3352f', '#d4773f', '#c9a227', '#6fa26b', '#2f7d4f'][d.score - 1] || CHART_COLORS[i % CHART_COLORS.length] },
+        itemStyle: { color: ['#ab3630', '#c9704a', '#c9a227', '#6fa26b', '#2c7a52'][d.score - 1] || CHART_COLORS[i % CHART_COLORS.length] },
       })),
+    }],
+    // 窄屏时饼图外标签空间不足：收起外标签，保留图例与悬浮/点击提示，
+    // 避免文字互相压住（数据与颜色不变）。
+    media: [{
+      query: { maxWidth: 520 },
+      option: { series: [{ label: { show: false }, labelLine: { show: false } }] },
     }],
   };
 }
@@ -32,13 +47,18 @@ function renderScopeChart(scope) {
   return {
     title: { text: '景点所属范围构成', left: 'center', textStyle: { fontSize: 14, fontWeight: 600 } },
     tooltip: { trigger: 'axis' },
-    legend: { bottom: 0 },
-    grid: { left: 70, right: 30, top: 50, bottom: 50 },
+    legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11 } },
+    /* 景点数（几百）与评论数（几万）量级差两个数量级，共用左轴时景点数的柱子
+       几乎不可见。拆成左右两条 y 轴，各自标注轴名；数据本身不变。 */
+    grid: { left: 62, right: 62, top: 54, bottom: 52 },
     xAxis: { type: 'category', data: scope.map(s => s.label) },
-    yAxis: { type: 'value' },
+    yAxis: [
+      { type: 'value', name: '评论数', nameTextStyle: { fontSize: 11 }, axisLabel: { formatter: v => fmtInt(v), fontSize: 11 } },
+      { type: 'value', name: '景点数', nameTextStyle: { fontSize: 11 }, axisLabel: { formatter: v => fmtInt(v), fontSize: 11 }, splitLine: { show: false } },
+    ],
     series: [
-      { name: '景点数', type: 'bar', data: scope.map(s => s.spot_count), itemStyle: { color: CHART_COLORS[0] } },
-      { name: '评论数', type: 'bar', data: scope.map(s => s.review_count), itemStyle: { color: CHART_COLORS[1] } },
+      { name: '景点数', type: 'bar', yAxisIndex: 1, barMaxWidth: 34, data: scope.map(s => s.spot_count), itemStyle: { color: CHART_COLORS[0] } },
+      { name: '评论数', type: 'bar', yAxisIndex: 0, barMaxWidth: 34, data: scope.map(s => s.review_count), itemStyle: { color: CHART_COLORS[1] } },
     ],
   };
 }
@@ -72,8 +92,8 @@ function renderBucketChart(buckets) {
       name: '景点数',
       type: 'bar',
       data: buckets.map(b => b.spot_count),
-      itemStyle: { color: CHART_COLORS[4] },
-      label: { show: true, position: 'top' },
+      itemStyle: { color: CHART_COLORS[1] },
+      label: { show: true, position: 'top', fontSize: 11 },
     }],
   };
 }

@@ -18,10 +18,20 @@
   #}
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand">
-        <h1>西藏旅游景点智能评价与分析系统</h1>
-        <p class="subtitle">{% block subtitle %}基于游客评论的离线智能分析平台{% endblock %}</p>
-      </div>
+      <a class="brand" href="{{ url_for('pages.index') }}" aria-label="返回首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" focusable="false">
+            <circle cx="29" cy="9" r="4.2" fill="#d9b382"/>
+            <path d="M2 30 L12 12 L19 24 L24 14 L38 30 Z" fill="#f7f2e8"/>
+            <path d="M2 30 L12 20 L19 27 L24 21 L38 30 Z" fill="#8b2323"/>
+            <path d="M5 33 H35" stroke="#d9b382" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <h1>西藏旅游景点智能评价与分析系统</h1>
+          <p class="subtitle">{% block subtitle %}基于游客评论的离线智能分析平台{% endblock %}</p>
+        </span>
+      </a>
       {# 当前栏目高亮：active_nav 由 app/web/__init__.py 的模板上下文注入，
          样式（.mainnav a.active / a.active::after）一直存在，但此前模板没有把它接上，
          因此任何页面都不会高亮——从首页进到内页时缺少"我在哪一栏"的提示。
@@ -32,13 +42,29 @@
         <a href="{{ url_for('pages.spots_page') }}" data-nav="spots"{% if active_nav == 'spots' %} class="active" aria-current="page"{% endif %}>景点分析</a>
         <a href="{{ url_for('pages.smart_page') }}" data-nav="smart"{% if active_nav == 'smart' %} class="active" aria-current="page"{% endif %}>智能分析</a>
         <a href="{{ url_for('pages.compare_page') }}" data-nav="compare"{% if active_nav == 'compare' %} class="active" aria-current="page"{% endif %}>景点对比</a>
-        <span class="nav-sep" aria-hidden="true"></span>
-        {% if current_user %}
-        <a href="{{ url_for('pages.admin_page') }}" data-nav="admin"{% if active_nav == 'admin' %} class="active" aria-current="page"{% endif %}>管理后台</a>
-        {% else %}
-        <a href="{{ url_for('pages.login_page') }}" data-nav="login"{% if active_nav == 'login' %} class="active" aria-current="page"{% endif %}>管理员</a>
-        {% endif %}
       </nav>
+      {# 账号区独立于可横向滚动的业务导航：窄屏下用户菜单仍然可见 #}
+      <div class="nav-account">
+        {% if current_user %}
+        <div class="usermenu">
+          <button id="user-menu-btn" type="button" class="user-chip"
+                  aria-haspopup="true" aria-expanded="false" aria-controls="user-menu">
+            <span class="user-name">{{ current_user.nickname or current_user.username }}</span>
+            <span class="user-role">{{ '管理员' if current_user.is_admin else '普通用户' }}</span>
+            <span class="user-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="user-menu" class="user-dropdown" hidden>
+            <a href="{{ url_for('pages.my_qa_page') }}">我的问答</a>
+            {% if current_user.is_admin %}
+            <a href="{{ url_for('pages.admin_page') }}">管理后台</a>
+            {% endif %}
+            <button id="btn-logout-global" type="button">退出登录</button>
+          </div>
+        </div>
+        {% else %}
+        <a class="login-link{% if active_nav == 'login' %} active{% endif %}" href="{{ url_for('pages.login_page') }}" data-nav="login"{% if active_nav == 'login' %} aria-current="page"{% endif %}>登录</a>
+        {% endif %}
+      </div>
     </div>
   </header>
 

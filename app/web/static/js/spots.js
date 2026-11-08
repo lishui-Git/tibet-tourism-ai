@@ -32,14 +32,12 @@ async function loadRanking() {
   const box = document.getElementById('rank-table');
   try {
     const data = await apiGet('/api/spots/ranking', { by, limit });
-    const valueOf = item => {
-      if (by === 'reviews') return fmtInt(item.review_count);
-      if (by === 'rating') return fmtNum(item.avg_score, 2);
-      return fmtPct(item.positive_rate);
-    };
-    const rows = data.items.map(item => [
+    // 原先的「排序依据」列只是把当前排序字段再抄一遍（按评论量时等于评论量、
+    // 按评分时等于平均评分），属于重复信息。改为「排名」：仍然 7 列，
+    // 但多给出一条真实信息（当前排序下的名次），没有删除任何指标。
+    const rows = data.items.map((item, i) => [
+      `<span class="rank-num">${i + 1}</span>`,
       `<a href="#" class="link" data-spot="${item.spot_id}">${escapeHtml(item.spot_name)}</a>`,
-      valueOf(item),
       fmtInt(item.review_count),
       fmtNum(item.avg_score, 2),
       fmtPct(item.positive_rate),
@@ -47,7 +45,7 @@ async function loadRanking() {
       item.has_full_evaluation ? '<span class="tag ok">可生成评价</span>' : '<span class="tag">仅基础统计</span>',
     ]);
     box.innerHTML = renderTable(
-      ['景点', '排序依据', '评论量', '平均评分', '好评率', '差评率', '评价条件'], rows
+      ['排名', '景点', '评论量', '平均评分', '好评率', '差评率', '评价条件'], rows
     );
     // 口径说明写在模板专门提供的 #rank-note 里（与总览页 ov-*-note 的写法一致）。
     // 此前是拼在表格容器内，导致 #rank-note 永远为空、且结果为空时口径说明会一并消失。
@@ -119,7 +117,7 @@ async function loadDetail(spotId) {
   const card = document.getElementById('detail-card');
   const body = document.getElementById('detail-body');
   card.style.display = '';
-  body.innerHTML = '<p class="hint">加载中…</p>';
+  body.innerHTML = window.UI.loading('加载中…');
   try {
     const data = await apiGet(`/api/spots/${spotId}`);
     const s = data.spot;
@@ -150,18 +148,23 @@ async function loadDetail(spotId) {
           ? '该景点具备生成综合评价的条件，可以前往 <a class="link" href="/smart?tab=evaluation&amp;spot=' + encodeURIComponent(spotId) + '">智能分析</a> 查看它的综合评价。'
           : '该景点评论量较少，只提供基础统计。你可以继续查看下方的情感分布与代表评论。'}
       </p>
+      <p>
+        <a class="ai-inline" href="/smart?tab=qa&amp;q=${encodeURIComponent(s.spot_name + '的游客评价如何？')}">让 AI 分析该景点 →</a>
+      </p>
       ${hasData ? `
       <h4>景点资料</h4>
-      <table class="data-table">
-        <tbody>
-          ${field('景区地址', s.address)}
-          ${field('开放时间', s.open_time)}
-          ${field('咨询电话', s.phone)}
-          ${field('景点介绍', s.introduction)}
-          ${field('信息来源', s.poi_url === null || s.poi_url === undefined || s.poi_url === ''
-            ? '' : '该景点页面的公开链接（见下方原始地址）')}
-        </tbody>
-      </table>` : ''}
+      <div class="table-wrap">
+        <table class="data-table">
+          <tbody>
+            ${field('景区地址', s.address)}
+            ${field('开放时间', s.open_time)}
+            ${field('咨询电话', s.phone)}
+            ${field('景点介绍', s.introduction)}
+            ${field('信息来源', s.poi_url === null || s.poi_url === undefined || s.poi_url === ''
+              ? '' : '该景点页面的公开链接（见下方原始地址）')}
+          </tbody>
+        </table>
+      </div>` : ''}
       ${s.poi_url ? `<p class="hint">原始页面：<a class="link" href="${escapeHtml(s.poi_url)}" target="_blank" rel="noopener">${escapeHtml(s.poi_url)}</a></p>` : ''}
       ${caliberNote(data.caliber_note, data.sample_size)}`;
 
@@ -202,9 +205,9 @@ async function loadSentiment(spotId) {
         radius: ['42%', '68%'],
         label: { formatter: '{b}\n{d}%' },
         data: [
-          { name: '正面', value: d.positive, itemStyle: { color: '#2f7d4f' } },
-          { name: '中性', value: d.neutral, itemStyle: { color: '#8a99a8' } },
-          { name: '负面', value: d.negative, itemStyle: { color: '#b3352f' } },
+          { name: '正面', value: d.positive, itemStyle: { color: '#3e7a5a' } },
+          { name: '中性', value: d.neutral, itemStyle: { color: '#8a8f8b' } },
+          { name: '负面', value: d.negative, itemStyle: { color: '#8b2323' } },
         ],
       }],
     });

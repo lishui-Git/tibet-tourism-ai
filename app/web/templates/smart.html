@@ -56,46 +56,75 @@
 
   <!-- ============================ 子功能二：智能问答 ============================ -->
   <div class="subpanel" id="panel-qa" role="tabpanel">
-    <h3>提问</h3>
-    <p class="hint">
-      系统只回答<strong>基于评论分析结果</strong>的问题。提问会先在数据库里检索相关事实，
-      再据此作答——因此不会出现"模型凭空发挥"的情况。
-    </p>
-    <p class="qa-ask">
-      <input id="qa-question" type="text" maxlength="200"
-             placeholder="例如：布达拉宫怎么样 / 评论量前十的景点 / 一共采集了多少条评论" />
-      <button id="btn-ask" type="button">提问</button>
-    </p>
-    <p class="hint">
-      可以试试：
-      <span class="kw chip" data-q="布达拉宫怎么样">布达拉宫怎么样</span>
-      <span class="kw chip" data-q="布达拉宫和纳木措景区哪个好">布达拉宫和纳木措景区哪个好</span>
-      <span class="kw chip" data-q="评论量前十的景点">评论量前十的景点</span>
-      <span class="kw chip" data-q="一共采集了多少条评论">一共采集了多少条评论</span>
-      <span class="kw chip" data-q="游客最关注哪些方面">游客最关注哪些方面</span>
-      <span class="kw chip" data-q="帮我规划一条西藏7日游路线">帮我规划一条西藏7日游路线（超出范围）</span>
-    </p>
-    <div id="qa-body"></div>
+    <section class="qa-chat" aria-label="西藏旅游 AI 助手">
+      <header class="qa-chat-head">
+        <div class="qa-chat-title">
+          <span class="ai-mark qa-chat-avatar" aria-hidden="true">AI</span>
+          <div>
+            <h3>西藏旅游 AI 助手</h3>
+            <p><span class="qa-status-dot" aria-hidden="true"></span>基于已入库的景点评论与统计数据回答</p>
+          </div>
+        </div>
+        <span class="qa-badge">评论数据问答</span>
+      </header>
 
-    <details class="fold">
-      <summary>系统可以回答哪几类问题？</summary>
-      <div class="fold-body">
-        <p>系统只回答与评论数据分析结果有关的问题，共六类：景点评价咨询、景点差异对比、
-          游客关注点、情感与方面解释、数据指标查询、排行相关。</p>
-        <p>以下三类问题系统会<strong>直接说明无法回答</strong>，不做任何猜测：</p>
-        <table class="data-table">
-          <thead><tr><th class="th-plain">情况</th><th class="th-plain">系统的处理</th></tr></thead>
-          <tbody>
-            <tr><td>询问路线规划、天气、订票等与评论分析无关的问题</td>
-                <td>说明可回答范围，不检索、不作答</td></tr>
-            <tr><td>问题里提到景点，但系统没能识别出具体景点</td>
-                <td>提示补充景点名称</td></tr>
-            <tr><td>数据库中确实没有相关信息</td>
-                <td>如实说明没有相关数据，<strong>不编造</strong></td></tr>
-          </tbody>
-        </table>
+      <div class="qa-chat-scroll" id="qa-scroll">
+        <div id="qa-welcome" class="qa-welcome">
+          <p class="qa-welcome-kicker">可以从这些问题开始</p>
+          <h3>你好，想了解哪个景点？</h3>
+          <p class="hint">
+            我可以基于已入库的游客评论，帮你查看景点评价、满意度排行、两景点对比和关注点。
+            回答只使用系统里已有的分析结果，不会编造评论。
+          </p>
+          <div class="qa-suggestions" aria-label="示例问题">
+            <button type="button" class="ai-example" data-q="布达拉宫的游客评价如何？">布达拉宫的游客评价如何？</button>
+            <button type="button" class="ai-example" data-q="哪些景点的游客满意度较高？">哪些景点的游客满意度较高？</button>
+            <button type="button" class="ai-example" data-q="比较布达拉宫和纳木措景区的游客评价">比较两个景点的游客评价</button>
+            <button type="button" class="ai-example" data-q="根据现有评论数据总结布达拉宫的优缺点">总结布达拉宫的优缺点</button>
+            <button type="button" class="ai-example" data-q="评论量前十的景点">评论量前十的景点</button>
+            <button type="button" class="ai-example" data-q="帮我规划一条西藏7日游路线">路线规划（超出范围）</button>
+          </div>
+        </div>
+
+        <div id="qa-body" class="qa-thread" role="log" aria-live="polite" aria-label="对话记录"></div>
+
+        <details class="fold qa-help">
+          <summary>系统可以回答哪几类问题？</summary>
+          <div class="fold-body">
+            <p>系统只回答与评论数据分析结果有关的问题，共六类：景点评价咨询、景点差异对比、
+              游客关注点、情感与方面解释、数据指标查询、排行相关。</p>
+            <p>以下三类问题系统会<strong>直接说明无法回答</strong>，不做任何猜测：</p>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th class="th-plain">情况</th><th class="th-plain">系统的处理</th></tr></thead>
+                <tbody>
+                  <tr><td>询问路线规划、天气、订票等与评论分析无关的问题</td>
+                      <td>说明可回答范围，不检索、不作答</td></tr>
+                  <tr><td>问题里提到景点，但系统没能识别出具体景点</td>
+                      <td>提示补充景点名称</td></tr>
+                  <tr><td>数据库中确实没有相关信息</td>
+                      <td>如实说明没有相关数据，<strong>不编造</strong></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
       </div>
-    </details>
+
+      <form id="qa-form" class="qa-composer" novalidate>
+        <textarea id="qa-question" rows="1" maxlength="200"
+                  placeholder="输入你想了解的景点问题，例如：布达拉宫的游客评价如何？"
+                  autocomplete="off" aria-label="输入你的问题"></textarea>
+        <button id="btn-ask" type="submit" class="qa-send" disabled aria-label="发送问题">
+          <span class="qa-send-label">发送</span>
+          <span class="qa-send-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+      <p class="qa-composer-hint">
+        <span>Enter 发送 · Shift+Enter 换行</span>
+        <span>回答基于已入库的评论分析结果</span>
+      </p>
+    </section>
   </div>
 </section>
 {% endblock %}
@@ -105,6 +134,7 @@
   /* 把初始子标签传给页面脚本（由 /smart?tab=… 决定） */
   window.__INITIAL_TAB__ = {{ initial_tab | tojson }};
   window.__INITIAL_SPOT__ = {{ initial_spot | tojson }};
+  window.__INITIAL_QUESTION__ = {{ initial_question | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/evaluation.js') }}"></script>
 <script src="{{ url_for('static', filename='js/qa.js') }}"></script>

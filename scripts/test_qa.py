@@ -275,11 +275,15 @@ def main() -> int:
             cur.execute("DELETE FROM sys_user WHERE user_id = %s", (user.user_id,))
             cur.execute("SELECT COUNT(*) AS n FROM qa_record")
             left_qa = int(cur.fetchone()["n"])
+            cur.execute("SELECT COUNT(*) AS n FROM sys_user WHERE user_id = %s", (user.user_id,))
+            left_test_users = int(cur.fetchone()["n"])
             cur.execute("SELECT COUNT(*) AS n FROM sys_user")
             left_users = int(cur.fetchone()["n"])
+    # 只要求本脚本创建的测试用户被清掉；库里可能已有演示账号，不能要求总数为 0
     check("清理后 qa_record 无残留", left_qa == 0, f"剩余 {left_qa} 行")
-    check("清理后 sys_user 无残留", left_users == 0, f"剩余 {left_users} 行")
-    print(f"\n已清理测试数据：qa_record 剩余 {left_qa} 行，sys_user 剩余 {left_users} 行")
+    check("清理后本脚本测试用户无残留", left_test_users == 0, f"剩余 {left_test_users} 行")
+    print(f"\n已清理测试数据：qa_record 剩余 {left_qa} 行，测试用户剩余 {left_test_users} 行；"
+          f"库内 sys_user 共 {left_users} 行（可能含演示账号）")
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)

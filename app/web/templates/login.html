@@ -1,57 +1,82 @@
 {% extends "base.html" %}
-{% block title %}管理员登录 · 西藏旅游景点智能评价与分析系统{% endblock %}
-{% block subtitle %}管理端功能登录{% endblock %}
-
-{# 内页页头：与首页 Hero 同源的视觉语言（本页为管理端入口，故说明文字更简短） #}
-{% block pagehead %}
-<section class="page-hero" data-art-box>
-  <img class="page-hero-art" src="{{ url_for('static', filename='img/scene-potala.svg') }}"
-       alt="" aria-hidden="true" decoding="async" data-art>
-  <div class="page-hero-veil" aria-hidden="true"></div>
-  <div class="page-hero-inner">
-    <p class="hero-eyebrow">管理端</p>
-    <h2>管理员登录</h2>
-    <p class="page-hero-lead">
-      管理端提供任务状态、系统日志与数据口径查看。公开的分析页面无需登录。
-    </p>
-  </div>
-  <div class="flagline" aria-hidden="true"></div>
-</section>
-{% endblock %}
+{% block title %}登录 · 西藏旅游景点智能评价与分析系统{% endblock %}
+{% block subtitle %}统一登录入口{% endblock %}
 
 {% block content %}
-<div class="login-shell">
-  <section class="card login-card">
-    <div class="section-title">
-      <h2>登录</h2>
-      <span class="st-sub">管理员账号</span>
-    </div>
-    <div class="login-form">
-      <label>用户名
-        <input id="login-user" type="text" autocomplete="username" placeholder="管理员用户名" />
-      </label>
-      <label>口令
-        <input id="login-pass" type="password" autocomplete="current-password" placeholder="登录口令" />
-      </label>
-      <button id="btn-login" type="button">登录</button>
-    </div>
-    <div id="login-msg"></div>
-    <details class="fold">
-      <summary>账号与安全说明</summary>
-      <div class="fold-body">
-        <table class="data-table">
-          <tbody>
-            <tr><th>公共页面</th><td>数据总览、景点分析、智能分析、景点对比——均为只读分析结果，<strong>无需登录</strong></td></tr>
-            <tr><th>需要登录</th><td>任务状态与日志、数据口径、系统自检</td></tr>
-            <tr><th>账号来源</th><td>由系统管理员在服务器端创建，<strong>不提供自助注册</strong>，避免权限被提升</td></tr>
-            <tr><th>口令存储</th><td>加盐哈希存储，数据库中不留明文</td></tr>
-            <tr><th>会话</th><td>签名 Cookie；账号被停用后旧会话立即失效</td></tr>
-          </tbody>
-        </table>
+<section class="login-shell">
+  <div class="login-split">
+    {# 左侧：藏地视觉 + 系统定位；插画沿用首页同一张，不引入新素材 #}
+    <div class="login-visual" data-art-box>
+      <img class="login-visual-art" src="{{ url_for('static', filename='img/tibet-hero.svg') }}"
+           alt="" aria-hidden="true" decoding="async" data-art>
+      <div class="login-visual-veil" aria-hidden="true"></div>
+      <div class="login-visual-inner">
+        <p class="hero-eyebrow">西藏 · 进藏沿线旅游评论分析</p>
+        <h2>让每一条评论<br>变成可读的景点口碑</h2>
+        <p>
+          汇集西藏及进藏沿线景点的游客评论，提供数据总览、景点分析、智能评价、
+          景点对比与 AI 问答；所有结论都来自已入库的真实分析结果。
+        </p>
+        <ul class="login-points">
+          <li>59,033 条真实评论 · 837 个景点</li>
+          <li>普通用户：登录后查看自己的问答历史</li>
+          <li>管理员：登录后进入任务、日志与数据口径后台</li>
+        </ul>
       </div>
-    </details>
-  </section>
-</div>
+      <div class="flagline" aria-hidden="true"></div>
+    </div>
+
+    {# 右侧：统一登录表单 #}
+    <div class="login-panel">
+      <div class="login-panel-head">
+        <p class="login-kicker">TIBET TOURISM INTELLIGENCE</p>
+        <h2>登录</h2>
+        <p>普通用户与管理员统一入口</p>
+      </div>
+
+      <form id="login-form" class="login-form" novalidate>
+        <div class="login-field">
+          <label for="login-user">用户名</label>
+          <input id="login-user" type="text" autocomplete="username"
+                 placeholder="请输入用户名" maxlength="32" />
+        </div>
+        <div class="login-field">
+          <label for="login-pass">口令</label>
+          <span class="input-wrap">
+            <input id="login-pass" type="password" autocomplete="current-password"
+                   placeholder="请输入登录口令" maxlength="64" />
+            <button id="toggle-pass" type="button" class="password-toggle"
+                    aria-label="显示口令" aria-pressed="false">显示</button>
+          </span>
+        </div>
+        <button id="btn-login" type="submit" class="login-submit">登录</button>
+      </form>
+
+      <div id="login-msg" role="status" aria-live="polite"></div>
+
+      <p class="login-hint">
+        公开分析页面无需登录；普通用户登录后可查看自己的问答历史，管理员登录后进入管理后台。
+      </p>
+
+      <details class="fold">
+        <summary>账号与安全说明</summary>
+        <div class="fold-body">
+          <div class="table-wrap">
+            <table class="data-table">
+              <tbody>
+                <tr><th>公共页面</th><td>数据总览、景点分析、智能分析、景点对比——均为只读分析结果，<strong>无需登录</strong></td></tr>
+                <tr><th>需要登录</th><td>我的问答（普通用户）；任务、日志、数据口径与管理自检（管理员）</td></tr>
+                <tr><th>账号来源</th><td>由系统管理员在服务器端创建，<strong>当前不提供自助注册</strong>，避免权限被提升</td></tr>
+                <tr><th>口令存储</th><td>加盐哈希存储，数据库中不留明文</td></tr>
+                <tr><th>会话</th><td>签名 Cookie；账号被停用后旧会话立即失效</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
 {% endblock %}
 
 {% block scripts %}

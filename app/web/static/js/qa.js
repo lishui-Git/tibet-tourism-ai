@@ -129,9 +129,8 @@ function renderFacts(blocks, opts) {
   if (!blocks || !blocks.length) return '';
   const collapsed = !!(opts && opts.collapsed);
   const sections = blocks.map(block => {
-    if (block.source === 'caliber') {
-      return `<div class="caliber">数据说明：${escapeHtml((block.items[0] || {}).口径 || '')}</div>`;
-    }
+    // 口径段由 renderQa 末尾统一渲染一次；这里跳过，避免页面出现两条相同的“数据说明”。
+    if (block.source === 'caliber') return '';
     const items = block.items || [];
     if (!items.length) return '';
     // 取所有条目的键并集作为表头（不同条目字段可能不同）。
@@ -178,15 +177,19 @@ function renderFacts(blocks, opts) {
 
 function renderQa(d) {
   const typeLabel = TYPE_LABELS[d.question_type] || '问题';
-  const spotNames = (d.spots || []).map(s => s.spot_name).join('、');
+  const spots = d.spots || [];
+  const spotNames = spots.map(s => s.spot_name).filter(Boolean).join('、');
 
   // 完整返回体留控制台：内部字段（model / prompt_version / token / reason）不进页面正文，
   // 但排查与答辩时打开控制台即可看到全部口径。
   try { console.info('[智能问答] 接口返回', d); window.__lastQa = d; } catch (e) { /* 忽略 */ }
 
+  const related = spotNames
+    ? `<p class="qa-related"><b>相关景点</b>：${escapeHtml(spotNames)}</p>`
+    : '';
   const head = window.UI.statCards([
     { label: '问题类型', value: escapeHtml(typeLabel) },
-    { label: '识别到的景点', value: (d.spots || []).length ? `${(d.spots || []).length} 个` : '—',
+    { label: '识别到的景点', value: spots.length ? `${spots.length} 个` : '—',
       sub: spotNames || '未涉及具体景点' },
     { label: '分析样本量', value: fmtInt(d.sample_size), sub: '条 · 来自评论分析结果' },
   ]);
@@ -201,8 +204,9 @@ function renderQa(d) {
         ? window.UI.notice('这个问题不在本系统的分析范围内，系统已直接说明、没有作任何推测。', 'warn')
         : ''}
       <div class="qa-answer">
-        <h4>回答</h4>
-        <p>${escapeHtml(d.answer)}</p>
+        <h4>主要结论</h4>
+        <p class="qa-answer-text">${escapeHtml(d.answer)}</p>
+        ${related}
         ${d.need_review
           ? window.UI.notice(d.need_review_note
               || '部分统计数据存在一致性提示，相关内容已由系统核对；'
@@ -220,49 +224,287 @@ function renderQa(d) {
   const advice = known.advice || '';
   return `
     ${head}
+    ${related}
     ${window.UI.notice(text, 'warn')}
     ${advice ? `<p class="hint">${escapeHtml(advice)}</p>` : ''}
     ${renderFacts(d.facts)}
     ${caliberNote(d.caliber_note, d.sample_size)}`;
 }
 
-async function doAsk(question) {
-  const input = document.getElementById('qa-question');
-  const box = document.getElementById('qa-body');
-  if (!box) return;
-  const q = question !== undefined ? question : (input ? input.value.trim() : '');
-  if (!q) {
-    box.innerHTML = window.UI.empty('请先输入你的问题。', 'warn');
+/* =============================================================================
+   聊天交互（2026-10-25）
+   -----------------------------------------------------------------------------
+   只使用现有 `/api/qa/ask`，不引入流式接口：
+     · 用户消息立即出现；AI 侧先出现“不确定进度”的处理中气泡；
+     · 请求成功/失败后替换同一个气泡，不追加第二条，避免重复；
+     · 45 秒超时，失败可显式重试；请求期间禁止再次发送；
+     · 只有用户本来就在底部时才自动滚动，查看旧消息时不打断。
+   ============================================================================= */
+
+let qaAsking = false;
+let qaController = null;
+let qaUserScrolled = false;
+let qaAutoScrolling = false;
+
+function qaInput() {
+  return document.getElementById('qa-question');
+}
+
+function qaSendButton() {
+  return document.getElementById('btn-ask');
+}
+
+/** 自动增高输入框，最大 120px；超过后内部滚动，不挤压聊天区。 */
+function autoGrowQa() {
+  const el = qaInput();
+  if (!el) return;
+  el.style.height = 'auto';
+  const h = Math.min(el.scrollHeight || 42, 120);
+  el.style.height = `${h}px`;
+  el.style.overflowY = (el.scrollHeight || 0) > 120 ? 'auto' : 'hidden';
+}
+
+/** 发送按钮：空内容禁用；请求中显示“发送中”并禁用。 */
+function updateQaSendState() {
+  const input = qaInput();
+  const btn = qaSendButton();
+  if (!btn) return;
+  const label = btn.querySelector('.qa-send-label');
+  if (qaAsking) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    btn.setAttribute('aria-busy', 'true');
+    if (label) label.textContent = '发送中';
     return;
   }
-  if (input) input.value = q;
-  box.innerHTML = '<p class="hint">正在检索相关数据…</p>';
+  btn.classList.remove('is-loading');
+  btn.removeAttribute('aria-busy');
+  if (label) label.textContent = '发送';
+  btn.disabled = !input || !input.value.trim();
+}
+
+function qaScrollBox() {
+  return document.getElementById('qa-scroll');
+}
+
+function isQaNearBottom() {
+  const box = qaScrollBox();
+  if (!box) return true;
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 88;
+}
+
+/** 滚动到某条消息的顶部；长回答优先露出“主要结论”，而不是直接跳到末尾。 */
+function scrollQaToMessage(el, force) {
+  const box = qaScrollBox();
+  if (!box || !el) return;
+  if (!force && !isQaNearBottom()) return;
+  qaAutoScrolling = true;
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const top = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+  box.scrollTo({ top: Math.max(0, top), behavior: reduce ? 'auto' : 'smooth' });
+  window.setTimeout(() => { qaAutoScrolling = false; }, 700);
+}
+
+/** 滚动到最新；force=false 时只在用户本来接近底部才滚，避免打断阅读。 */
+function scrollQaToLast(force) {
+  const box = qaScrollBox();
+  if (!box || !box.lastElementChild) return;
+  scrollQaToMessage(box.lastElementChild, force);
+}
+
+/** 追加一条消息；头像是消息的一部分，用户/AI 各一套样式。 */
+function appendQaBubble(role, html, id, opts) {
+  const box = document.getElementById('qa-body');
+  if (!box) return null;
+  const isUser = role === 'user';
+  const wrap = document.createElement('div');
+  wrap.className = `qa-msg ${isUser ? 'user' : 'assistant'}`;
+  if (opts && opts.pending) wrap.classList.add('qa-pending');
+  if (id) wrap.id = id;
+  wrap.innerHTML = `
+    <span class="qa-msg-avatar ${isUser ? 'is-user' : 'is-ai'}" aria-hidden="true">${isUser ? '我' : 'AI'}</span>
+    <div class="qa-bubble">${html}</div>`;
+  box.appendChild(wrap);
+  return wrap;
+}
+
+/** 只替换气泡内容，保留头像与消息节点（避免出现“加载气泡 + 回答气泡”两条）。 */
+function setQaBubbleContent(target, html) {
+  if (!target) return;
+  target.classList.remove('qa-pending');
+  const bubble = target.querySelector('.qa-bubble');
+  if (bubble) bubble.innerHTML = html;
+}
+
+function qaLoadingHtml() {
+  // 后端没有返回百分比/阶段事件，这里只做**不确定进度**，不伪造完成比例。
+  return `<div class="qa-loading" role="status">
+      <p class="qa-loading-title">
+        <span class="qa-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>正在分析你的问题…</span>
+      </p>
+      <p class="qa-loading-sub">正在检索已入库的评论分析结果，请稍候</p>
+      <span class="qa-progress" aria-hidden="true"><i></i></span>
+    </div>`;
+}
+
+function qaErrorHtml(message, q) {
+  return `<div class="qa-error" role="alert">
+      <p class="qa-error-title">${escapeHtml(message)}</p>
+      <p class="hint">问题没有丢失。可以检查网络后重试，或换一种问法。</p>
+      <button type="button" class="qa-retry">重试这条问题</button>
+    </div>`;
+}
+
+function bindQaRetry(target, q) {
+  if (!target) return;
+  const retry = target.querySelector('.qa-retry');
+  if (retry) {
+    retry.addEventListener('click', () => {
+      if (qaAsking) return;
+      retry.disabled = true;
+      // 重试是同一条问题的继续：移除旧错误气泡，不再追加一遍用户消息。
+      const message = target.closest('.qa-msg');
+      if (message) message.remove();
+      doAsk(q, { retry: true });
+    });
+  }
+}
+
+function qaErrorMessage(err) {
+  const data = err && err.response && err.response.data;
+  if (data && data.code !== undefined) {
+    return window.UI.userMessage({ code: data.code, message: data.message });
+  }
+  const name = err && (err.name || err.code);
+  if (name === 'CanceledError' || name === 'ERR_CANCELED' || name === 'AbortError') {
+    return '请求超时，系统没有在 45 秒内返回结果。';
+  }
+  return '网络请求失败，暂时没有收到系统的回答。';
+}
+
+async function doAsk(question, opts) {
+  if (qaAsking) return;
+  const input = qaInput();
+  const box = document.getElementById('qa-body');
+  if (!box) return;
+
+  const q = question !== undefined ? String(question).trim() : (input ? input.value.trim() : '');
+  if (!q) {
+    if (input) input.focus();
+    return;
+  }
+
+  const welcome = document.getElementById('qa-welcome');
+  if (welcome) welcome.hidden = true;
+
+  // 用户消息先出现；只有用户本来在底部才强行滚到最新。
+  // 重试已经保留了原用户消息，不再重复追加。
+  const stick = isQaNearBottom();
+  qaUserScrolled = false;
+  if (!(opts && opts.retry)) {
+    appendQaBubble('user', `<p class="qa-user-text">${escapeHtml(q)}</p>`);
+    scrollQaToLast(true);
+  }
+  if (input) {
+    input.value = '';
+    autoGrowQa();
+  }
+
+  const pendingId = `qa-pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const pending = appendQaBubble('assistant', qaLoadingHtml(), pendingId, { pending: true });
+  if (stick) scrollQaToLast(true);
+
+  qaAsking = true;
+  if (input) input.disabled = true;
+  updateQaSendState();
+
+  qaController = new AbortController();
+  const timer = setTimeout(() => qaController && qaController.abort(), 45000);
+
   try {
-    const resp = await axios.post('/api/qa/ask', { question: q });
+    const resp = await axios.post('/api/qa/ask', { question: q }, {
+      signal: qaController.signal,
+      timeout: 45000,
+      headers: { 'Content-Type': 'application/json' },
+    });
     const body = resp.data || {};
     if (body.code !== 0) {
-      box.innerHTML = window.UI.notice(
-        `提问失败：${window.UI.userMessage({ code: body.code, message: body.message })}`,
-        'bad', `业务码 ${body.code}：${body.message}`);
-      return;
+      const msg = window.UI.userMessage({ code: body.code, message: body.message });
+      setQaBubbleContent(pending, qaErrorHtml(`提问失败：${msg}`, q));
+      bindQaRetry(pending, q);
+    } else {
+      setQaBubbleContent(pending, renderQa(body.data || {}));
     }
-    box.innerHTML = renderQa(body.data || {});
-  } catch (e) {
-    const data = e.response && e.response.data;
-    box.innerHTML = window.UI.notice(
-      `提问失败：${window.UI.userMessage(data ? { code: data.code, message: data.message } : e)}`,
-      'bad', data ? `业务码 ${data.code}：${data.message}` : String(e));
+  } catch (err) {
+    const msg = qaErrorMessage(err);
+    setQaBubbleContent(pending, qaErrorHtml(`提问失败：${msg}`, q));
+    bindQaRetry(pending, q);
+    try { console.warn('[智能问答] 请求失败', err); } catch (e) { /* 忽略 */ }
+  } finally {
+    clearTimeout(timer);
+    qaController = null;
+    qaAsking = false;
+    if (input) {
+      input.disabled = false;
+      autoGrowQa();
+    }
+    updateQaSendState();
+    // 长回答只滚到“这条回答的顶部”，保证先看到主要结论；
+    // 若用户在等待期间主动上滑查看旧消息，则不强行打断。
+    if (stick && !qaUserScrolled) scrollQaToMessage(pending, true);
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const btn = document.getElementById('btn-ask');
-  if (btn) btn.addEventListener('click', () => doAsk());
-  const input = document.getElementById('qa-question');
-  if (input) {
-    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') doAsk(); });
+  const form = document.getElementById('qa-form');
+  const input = qaInput();
+
+  if (form) {
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      if (qaAsking) return;
+      doAsk();
+    });
   }
-  document.querySelectorAll('.chip[data-q]').forEach(chip => {
-    chip.addEventListener('click', () => doAsk(chip.getAttribute('data-q')));
+
+  const thread = qaScrollBox();
+  if (thread) {
+    // scroll 事件也会被程序化滚动触发；wheel/touchmove 只可能来自用户，
+    // 用它标记“用户正在看旧消息”，避免回答返回时强行拽回底部。
+    thread.addEventListener('scroll', () => {
+      if (!qaAutoScrolling) qaUserScrolled = true;
+    }, { passive: true });
+    thread.addEventListener('wheel', () => { qaUserScrolled = true; }, { passive: true });
+    thread.addEventListener('touchmove', () => { qaUserScrolled = true; }, { passive: true });
+  }
+
+  if (input) {
+    input.addEventListener('input', () => {
+      autoGrowQa();
+      updateQaSendState();
+    });
+    input.addEventListener('keydown', ev => {
+      // 输入法组合中的 Enter 不能误发送；Shift+Enter 保留换行。
+      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+        ev.preventDefault();
+        if (!qaAsking) doAsk();
+      }
+    });
+    autoGrowQa();
+  }
+
+  document.querySelectorAll('.ai-example[data-q], .chip[data-q]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (qaAsking) return;
+      doAsk(chip.getAttribute('data-q'));
+    });
   });
+
+  // 页面离开/刷新时中止未完成请求，避免“后台请求回来时页面已销毁”。
+  window.addEventListener('pagehide', () => {
+    if (qaController) qaController.abort();
+  });
+
+  updateQaSendState();
 });
